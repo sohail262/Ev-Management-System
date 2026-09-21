@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>U-Like — EV Inventory & Sales</title>
+  <meta name="theme-color" content="#14614f">
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><rect width=%2224%22 height=%2224%22 rx=%225%22 fill=%22%2314614f%22/><path d=%22M13 4 6.5 14h4L9.5 20l8-9.5h-4L15 4z%22 fill=%22white%22/></svg>">
+  <link rel="stylesheet" href="./css/styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+
+<body>
+
+  <div id="splash" class="app-splash">
+    <div class="spinner"></div>
+    <strong>Loading U-Like Inventory…</strong>
+  </div>
+
+  <div class="app-shell" id="app-shell" style="display:none;">
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__brand">
+        <div class="sidebar__brand-mark">U</div>
+        <div class="sidebar__brand-text">
+          <strong>U-Like</strong>
+          <span>EV Inventory &amp; Sales</span>
+        </div>
+      </div>
+      <nav class="sidebar__nav" id="sidebar-nav"></nav>
+      <div class="sidebar__footer">5 shops · live sync</div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn topbar__menu-btn" id="menu-btn" aria-label="Open menu">
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></span>
+        </button>
+        <div class="topbar__title" id="topbar-title">Dashboard</div>
+        <div class="location-switch">
+          <select id="location-filter"></select>
+        </div>
+      </header>
+      <main class="view" id="view-root"></main>
+    </div>
+  </div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+
+</html>
