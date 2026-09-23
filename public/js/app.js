@@ -2,15 +2,17 @@ import { icon } from './icons.js';
 import { $, toast } from './utils.js';
 import { initState, getState, subscribe, setLocationFilter, isReady } from './state.js';
 
+const V = '?v=2.6';
 const ROUTES = [
-  { id: 'dashboard', label: 'Dashboard', tag: 'Overview', icon: 'dashboard', mod: () => import('./views/dashboard.js') },
-  { id: 'evs', label: 'EV Inventory', tag: 'Vehicles', icon: 'ev', mod: () => import('./views/evInventory.js') },
-  { id: 'units', label: 'Batteries & Chargers', tag: 'Stock', icon: 'battery', mod: () => import('./views/batteryCharger.js') },
-  { id: 'spareparts', label: 'Spare Parts', tag: 'Stock', icon: 'package', mod: () => import('./views/spareParts.js') },
-  { id: 'sales', label: 'Sales', tag: 'Billing', icon: 'sales', mod: () => import('./views/sales.js') },
-  { id: 'transfers', label: 'Transfers', tag: 'Movement', icon: 'transfer', mod: () => import('./views/transfers.js') },
-  { id: 'reports', label: 'Reports', tag: 'Insights', icon: 'reports', mod: () => import('./views/reports.js') },
-  { id: 'locations', label: 'Locations & Brands', tag: 'Setup', icon: 'store', mod: () => import('./views/locations.js') }
+  { id: 'dashboard', label: 'Dashboard', tag: 'Overview', icon: 'dashboard', mod: () => import(`./views/dashboard.js${V}`) },
+  { id: 'evs', label: 'EV Inventory', tag: 'Vehicles', icon: 'ev', mod: () => import(`./views/evInventory.js${V}`) },
+  { id: 'units', label: 'Batteries & Chargers', tag: 'Stock', icon: 'battery', mod: () => import(`./views/batteryCharger.js${V}`) },
+  { id: 'spareparts', label: 'Spare Parts', tag: 'Stock', icon: 'package', mod: () => import(`./views/spareParts.js${V}`) },
+  { id: 'sales', label: 'Sales', tag: 'Billing', icon: 'sales', mod: () => import(`./views/sales.js${V}`) },
+  { id: 'expenses', label: 'Expenses', tag: 'Daily Accounts', icon: 'wallet', mod: () => import(`./views/expenses.js${V}`) },
+  { id: 'transfers', label: 'Transfers', tag: 'Movement', icon: 'transfer', mod: () => import(`./views/transfers.js${V}`) },
+  { id: 'reports', label: 'Reports', tag: 'Insights', icon: 'reports', mod: () => import(`./views/reports.js${V}`) },
+  { id: 'locations', label: 'Locations & Brands', tag: 'Setup', icon: 'store', mod: () => import(`./views/locations.js${V}`) }
 ];
 
 const sidebarNav = $('#sidebar-nav');

@@ -29,20 +29,36 @@ async function nextInvoiceNo() {
   return invoiceNumber(seq);
 }
 
-// ================= EV SALE (bundle) =================
-export async function createEvSale({ ev, batteryWattage, batteryCount, price, customerName, customerPhone, locationId, paymentMethod, saleDate }) {
-  const batteryUnits = await findAvailableUnits('battery', { wattage: batteryWattage, locationId, count: batteryCount, preferLinkedEvId: ev.id });
-  if (batteryUnits.length < batteryCount) {
-    throw new Error(`Only ${batteryUnits.length} battery unit(s) of ${batteryWattage}W available at this location (need ${batteryCount}).`);
+// ================= EV SALE (flexible battery & charger) =================
+export async function createEvSale({
+  ev, batteryType = '', batteryCount = 0, chargerWattage = null,
+  price, customerName, customerPhone, locationId, paymentMethod, saleDate
+}) {
+  const count = Number(batteryCount) || 0;
+  let batteryUnits = [];
+  if (batteryType && count > 0) {
+    batteryUnits = await findAvailableUnits('battery', { batteryType, locationId, count });
+    if (batteryUnits.length < count) {
+      throw new Error(`Only ${batteryUnits.length} unit(s) of ${batteryType} available at this location (need ${count}).`);
+    }
   }
-  const chargerUnits = await findAvailableUnits('charger', { wattage: batteryWattage, locationId, count: 1, preferLinkedEvId: ev.id });
-  if (chargerUnits.length < 1) {
-    throw new Error(`No ${batteryWattage}W charger available at this location.`);
-  }
-  const chargerUnit = chargerUnits[0];
 
-  const costTotal = (ev.costPrice || 0) + batteryUnits.reduce((s, u) => s + (u.costPrice || 0), 0) + (chargerUnit.costPrice || 0);
-  const computedPrice = (ev.sellingPrice || 0) + batteryUnits.reduce((s, u) => s + (u.sellingPrice || 0), 0) + (chargerUnit.sellingPrice || 0);
+  let chargerUnit = null;
+  if (chargerWattage) {
+    const chgUnits = await findAvailableUnits('charger', { wattage: Number(chargerWattage), locationId, count: 1 });
+    if (!chgUnits.length) {
+      throw new Error(`No ${chargerWattage}W charger available at this location.`);
+    }
+    chargerUnit = chgUnits[0];
+  }
+
+  const battCost = batteryUnits.reduce((s, u) => s + (u.costPrice || 0), 0);
+  const battSelling = batteryUnits.reduce((s, u) => s + (u.sellingPrice || 0), 0);
+  const chgCost = chargerUnit ? (chargerUnit.costPrice || 0) : 0;
+  const chgSelling = chargerUnit ? (chargerUnit.sellingPrice || 0) : 0;
+
+  const costTotal = (ev.costPrice || 0) + battCost + chgCost;
+  const computedPrice = (ev.sellingPrice || 0) + battSelling + chgSelling;
   const finalPrice = price != null && price !== '' ? Number(price) : computedPrice;
   const invoiceNo = await nextInvoiceNo();
 
@@ -52,34 +68,72 @@ export async function createEvSale({ ev, batteryWattage, batteryCount, price, cu
     invoiceNo, type: 'ev', date: saleDate ? new Date(saleDate) : serverTimestamp(),
     customerName: customerName || '', customerPhone: customerPhone || '', locationId, paymentMethod,
     evId: ev.id, providerId: ev.providerId, model: ev.model || '', chassisNo: ev.chassisNo || '',
-    batteryWattage, batteryCount, batteryUnitIds: batteryUnits.map(u => u.id), chargerUnitId: chargerUnit.id,
+    hasBattery: Boolean(batteryType && count > 0),
+    batteryType: batteryType || '',
+    batteryCount: count,
+    batteryCombinedWattage: count * 12,
+    batteryUnitIds: batteryUnits.map(u => u.id),
+    batteriesPrice: battSelling,
+    hasCharger: Boolean(chargerUnit),
+    chargerWattage: chargerUnit ? Number(chargerWattage) : null,
+    chargerUnitId: chargerUnit ? chargerUnit.id : null,
+    chargerPrice: chgSelling,
     evPrice: ev.sellingPrice || 0,
-    batteriesPrice: batteryUnits.reduce((s, u) => s + (u.sellingPrice || 0), 0),
-    chargerPrice: chargerUnit.sellingPrice || 0,
     price: finalPrice, costTotal, profit: finalPrice - costTotal
   });
+
   batch.update(doc(evCol, ev.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() });
   batteryUnits.forEach(u => batch.update(doc(batteryCol, u.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() }));
-  batch.update(doc(chargerCol, chargerUnit.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() });
+  if (chargerUnit) {
+    batch.update(doc(chargerCol, chargerUnit.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() });
+  }
+
   addStockLog(batch, { type: 'sale', itemType: 'ev', label: `EV sold${customerName ? ` to ${customerName}` : ''}`, locationId });
   await batch.commit();
   return saleRef.id;
 }
 
 // ================= STANDALONE BATTERY / CHARGER SALE =================
-export async function createUnitSale(type, { unit, price, customerName, customerPhone, paymentMethod, saleDate }) {
+export async function createUnitSale(type, {
+  batteryType, wattage, qty = 1, price, locationId, customerName, customerPhone, paymentMethod, saleDate
+}) {
+  const count = Math.max(1, Number(qty) || 1);
+  const isBattery = type === 'battery';
+  const units = await findAvailableUnits(type, {
+    batteryType: isBattery ? batteryType : undefined,
+    wattage: !isBattery ? Number(wattage) : undefined,
+    locationId,
+    count
+  });
+
+  if (units.length < count) {
+    const name = isBattery ? batteryType : `${wattage}W Charger`;
+    throw new Error(`Only ${units.length} unit(s) of ${name} available at this location (need ${count}).`);
+  }
+
+  const costTotal = units.reduce((s, u) => s + (u.costPrice || 0), 0);
+  const computedPrice = units.reduce((s, u) => s + (u.sellingPrice || 0), 0);
+  const finalPrice = price != null && price !== '' ? Number(price) : computedPrice;
   const invoiceNo = await nextInvoiceNo();
-  const finalPrice = price != null && price !== '' ? Number(price) : (unit.sellingPrice || 0);
+
   const batch = writeBatch(db);
   const saleRef = doc(salesCol);
   batch.set(saleRef, {
     invoiceNo, type, date: saleDate ? new Date(saleDate) : serverTimestamp(),
-    customerName: customerName || '', customerPhone: customerPhone || '', locationId: unit.locationId, paymentMethod,
-    unitId: unit.id, wattage: unit.wattage,
-    price: finalPrice, costTotal: unit.costPrice || 0, profit: finalPrice - (unit.costPrice || 0)
+    customerName: customerName || '', customerPhone: customerPhone || '', locationId, paymentMethod,
+    qty: count,
+    batteryType: isBattery ? batteryType : '',
+    batteryCombinedWattage: isBattery ? (count * 12) : null,
+    wattage: isBattery ? 12 : Number(wattage),
+    unitIds: units.map(u => u.id),
+    price: finalPrice, costTotal, profit: finalPrice - costTotal
   });
-  batch.update(doc(unitCol(type), unit.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() });
-  addStockLog(batch, { type: 'sale', itemType: type, label: `${unit.wattage}W ${type} sold`, locationId: unit.locationId });
+
+  units.forEach(u => batch.update(doc(unitCol(type), u.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() }));
+  const logDesc = isBattery
+    ? `${count} × ${batteryType} sold (${count * 12}W)`
+    : `${count} × ${wattage}W Charger sold`;
+  addStockLog(batch, { type: 'sale', itemType: type, label: logDesc, locationId });
   await batch.commit();
   return saleRef.id;
 }

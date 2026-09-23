@@ -2,11 +2,31 @@
 // Firestore on first run (see seed.js) and are editable afterwards from the
 // Locations / Providers views — these arrays are only the initial seed data.
 
-export const WATTAGES = [48, 60, 72];
+export const CHARGER_WATTAGES = [48, 60, 72];
+export const WATTAGES = CHARGER_WATTAGES; // alias for charger wattages
 
-export const BATTERY_COUNTS = [3, 5, 8];
+export const BATTERY_TYPES = ['Lead Battery', 'Lithium Battery'];
+export const BATTERY_UNIT_WATTAGE = 12; // Each battery is of 12W
+
+export const BATTERY_COUNTS = [4, 5, 6, 8];
 
 export const PAYMENT_METHODS = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Finance / Loan'];
+
+export const EXPENSE_CATEGORIES = [
+  'Shop Rent',
+  'Electricity & Utilities',
+  'Staff Salaries & Wages',
+  'Staff Food & Refreshments',
+  'Logistics & Transport',
+  'Shop Maintenance & Repairs',
+  'Advertising & Marketing',
+  'Office & Cleaning Supplies',
+  'Customer Hospitality / Tea',
+  'Government Fees & Taxes',
+  'Misc / Other'
+];
+
+export const EXPENSE_PAYMENT_METHODS = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Cheque'];
 
 export const SPARE_PART_CATEGORIES = [
   'Brakes', 'Tyres & Tubes', 'Electricals', 'Body Parts', 'Motor & Controller',

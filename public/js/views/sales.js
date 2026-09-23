@@ -4,10 +4,10 @@ import {
   escapeHtml, formatMoney, formatDateTime, todayInputValue, debounce,
   openModal, closeModal, toast, $
 } from '../utils.js';
-import { WATTAGES, BATTERY_COUNTS, PAYMENT_METHODS, STATUS, MAIN_LOCATION_ID } from '../constants.js';
+import { CHARGER_WATTAGES, BATTERY_TYPES, BATTERY_UNIT_WATTAGE, PAYMENT_METHODS, STATUS, MAIN_LOCATION_ID } from '../constants.js';
 import { inLocation } from './helpers.js';
 import { createEvSale, createUnitSale, createSparePartSale, getSale } from '../data/sales.js';
-import { generateInvoicePdf } from '../invoice.js';
+import { generateInvoicePdf } from '../invoice.js?v=2.6';
 
 let filters = { type: 'all', search: '' };
 
@@ -103,9 +103,29 @@ function renderTable(items, state) {
 }
 
 function saleSummary(s) {
-  if (s.type === 'ev') return `${escapeHtml(providerName(s.providerId))} EV<div class="cell-muted">${s.batteryCount}× ${s.batteryWattage}W battery + charger</div>`;
+  if (s.type === 'ev') {
+    const details = [];
+    if (s.hasBattery || (s.batteryCount && s.batteryCount > 0)) {
+      const battW = s.batteryCombinedWattage || (s.batteryCount * BATTERY_UNIT_WATTAGE);
+      details.push(`${s.batteryCount}× ${s.batteryType || 'Battery'} (${battW}W)`);
+    }
+    if (s.hasCharger || s.chargerWattage) {
+      details.push(`${s.chargerWattage}W Charger`);
+    }
+    return `${escapeHtml(providerName(s.providerId))} EV${s.model ? ' - ' + escapeHtml(s.model) : ''}` +
+      (details.length ? `<div class="cell-muted">${escapeHtml(details.join(' + '))}</div>` : `<div class="cell-muted">Vehicle only</div>`);
+  }
+  if (s.type === 'battery') {
+    const qty = s.qty || 1;
+    const bType = s.batteryType || 'Lead Battery';
+    return `${qty}× ${escapeHtml(bType)}<div class="cell-muted">${qty * BATTERY_UNIT_WATTAGE}W combined</div>`;
+  }
+  if (s.type === 'charger') {
+    const qty = s.qty || 1;
+    return `${qty}× ${s.wattage}W Charger`;
+  }
   if (s.type === 'sparepart') return `${escapeHtml(s.sparePartName)}<div class="cell-muted">Qty ${s.qty}</div>`;
-  return `${s.wattage}W ${s.type === 'battery' ? 'Battery' : 'Charger'}`;
+  return 'Sale';
 }
 
 function downloadInvoice(sale) {
@@ -190,15 +210,39 @@ function openSaleModal(state) {
       if (saleType === 'ev') {
         const ev = state.evUnits.find(x => x.id === fd.get('evId'));
         if (!ev) throw new Error('Select a vehicle to sell.');
+        const bType = fd.get('batteryType');
+        const bCount = bType !== 'none' ? Number(fd.get('batteryCount')) : 0;
+        const chgWatt = fd.get('chargerWattage') !== 'none' ? Number(fd.get('chargerWattage')) : null;
+
         saleId = await createEvSale({
-          ev, batteryWattage: Number(fd.get('batteryWattage')), batteryCount: Number(fd.get('batteryCount')),
-          price: fd.get('price'), locationId: ev.locationId, ...common
+          ev,
+          batteryType: bType !== 'none' ? bType : '',
+          batteryCount: bCount,
+          chargerWattage: chgWatt,
+          price: fd.get('price'),
+          locationId: ev.locationId,
+          ...common
         });
-      } else if (saleType === 'battery' || saleType === 'charger') {
-        const units = (saleType === 'battery' ? state.batteryUnits : state.chargerUnits)
-          .filter(u => u.status === STATUS.IN_STOCK && u.locationId === fd.get('locationId') && String(u.wattage) === fd.get('wattage'));
-        if (!units.length) throw new Error(`No ${fd.get('wattage')}W ${saleType} available at this location.`);
-        saleId = await createUnitSale(saleType, { unit: units[0], price: fd.get('price'), ...common });
+      } else if (saleType === 'battery') {
+        const bType = fd.get('batteryType');
+        const qty = Number(fd.get('qty')) || 1;
+        saleId = await createUnitSale('battery', {
+          batteryType: bType,
+          qty,
+          price: fd.get('price'),
+          locationId: fd.get('locationId'),
+          ...common
+        });
+      } else if (saleType === 'charger') {
+        const watt = Number(fd.get('wattage'));
+        const qty = Number(fd.get('qty')) || 1;
+        saleId = await createUnitSale('charger', {
+          wattage: watt,
+          qty,
+          price: fd.get('price'),
+          locationId: fd.get('locationId'),
+          ...common
+        });
       } else {
         const part = state.spareParts.find(x => x.id === fd.get('sparePartId'));
         if (!part) throw new Error('Select a spare part.');
@@ -241,23 +285,30 @@ function renderFields(host, type, state) {
           </div>
         </div>
         <div class="field">
-          <label>Battery wattage</label>
+          <label>Battery</label>
           <div class="select-wrap">
-            <select name="batteryWattage" id="sale-wattage">
-              ${WATTAGES.map(w => `<option value="${w}">${w}W</option>`).join('')}
+            <select name="batteryType" id="sale-batt-type">
+              <option value="none">No battery (Vehicle only)</option>
+              ${BATTERY_TYPES.map(t => `<option value="${t}" ${t === 'Lead Battery' ? 'selected' : ''}>${t} (12W each)</option>`).join('')}
             </select>
             ${icon('chevronDown')}
           </div>
+        </div>
+        <div class="field" id="batt-count-wrap">
+          <label>Battery quantity <span class="hint" id="batt-count-hint">(5 × 12W = 60W combined)</span></label>
+          <input name="batteryCount" id="sale-batt-count" type="number" min="1" step="1" value="5">
         </div>
         <div class="field">
-          <label>Battery count</label>
+          <label>Charger</label>
           <div class="select-wrap">
-            <select name="batteryCount" id="sale-count">
-              ${BATTERY_COUNTS.map(c => `<option value="${c}">${c} batteries</option>`).join('')}
+            <select name="chargerWattage" id="sale-charger">
+              <option value="none">No charger</option>
+              ${CHARGER_WATTAGES.map(w => `<option value="${w}" ${w === 60 ? 'selected' : ''}>${w}W Charger</option>`).join('')}
             </select>
             ${icon('chevronDown')}
           </div>
         </div>
+        <div></div>
         <div class="field field--full" id="sale-availability"></div>
         <div class="field field--full">
           <label>Total sale price <span class="hint">(auto-calculated, editable)</span></label>
@@ -267,41 +318,83 @@ function renderFields(host, type, state) {
 
     const locSel = $('#sale-loc', host);
     const evSel = $('#sale-ev', host);
-    const wattSel = $('#sale-wattage', host);
-    const countSel = $('#sale-count', host);
+    const bTypeSel = $('#sale-batt-type', host);
+    const bCountInput = $('#sale-batt-count', host);
+    const bCountWrap = $('#batt-count-wrap', host);
+    const bCountHint = $('#batt-count-hint', host);
+    const chgSel = $('#sale-charger', host);
+    const availHost = $('#sale-availability', host);
+    const priceInput = $('#sale-price', host);
 
     function populateEvs() {
       const evs = state.evUnits.filter(e => e.status === STATUS.IN_STOCK && e.locationId === locSel.value);
       evSel.innerHTML = evs.length
-        ? evs.map(e => `<option value="${e.id}" data-wattage="${e.bundleWattage}">${providerName(e.providerId)}${e.model ? ' - ' + e.model : ''}${e.chassisNo ? ` (${e.chassisNo})` : ''} — ${formatMoney(e.sellingPrice)}</option>`).join('')
+        ? evs.map(e => `<option value="${e.id}">${providerName(e.providerId)}${e.model ? ' - ' + e.model : ''}${e.chassisNo ? ` (${e.chassisNo})` : ''} — ${formatMoney(e.sellingPrice)}</option>`).join('')
         : `<option value="">No EVs in stock at this location</option>`;
-      if (evs.length) wattSel.value = evs[0].bundleWattage;
       updatePreview();
     }
+
     function updatePreview() {
       const ev = state.evUnits.find(e => e.id === evSel.value);
-      const wattage = Number(wattSel.value);
-      const count = Number(countSel.value);
-      const availHost = $('#sale-availability', host);
-      const priceInput = $('#sale-price', host);
-      if (!ev) { availHost.innerHTML = ''; return; }
-      const battAvail = availableCount(state.batteryUnits, wattage, ev.locationId, ev.id);
-      const chgAvail = availableCount(state.chargerUnits, wattage, ev.locationId, ev.id);
-      const ok = battAvail >= count && chgAvail >= 1;
-      availHost.innerHTML = `<div class="${ok ? 'form-note' : 'form-error'}">${icon(ok ? 'checkCircle' : 'alert')}<span>${battAvail} × ${wattage}W batteries and ${chgAvail} × ${wattage}W charger available at this location. Need ${count} batteries + 1 charger.</span></div>`;
-      const battPrice = sumSellingPrice(state.batteryUnits, wattage, ev.locationId, ev.id, count);
-      const chgPrice = firstSellingPrice(state.chargerUnits, wattage, ev.locationId, ev.id);
+      if (!ev) { availHost.innerHTML = ''; priceInput.value = ''; return; }
+
+      const bType = bTypeSel.value;
+      const hasBattery = bType !== 'none';
+      bCountWrap.style.display = hasBattery ? 'block' : 'none';
+      const bCount = hasBattery ? Math.max(1, Number(bCountInput.value) || 1) : 0;
+      const combinedWattage = bCount * BATTERY_UNIT_WATTAGE;
+
+      if (hasBattery) {
+        bCountHint.textContent = `(${bCount} × 12W = ${combinedWattage}W combined)`;
+      }
+
+      const chgWatt = chgSel.value;
+      const hasCharger = chgWatt !== 'none';
+
+      let ok = true;
+      const messages = [];
+
+      let battPrice = 0;
+      if (hasBattery) {
+        const battAvail = availableBatteryCount(state.batteryUnits, bType, ev.locationId);
+        if (battAvail < bCount) {
+          ok = false;
+          messages.push(`Only ${battAvail} × ${bType} available (need ${bCount}).`);
+        } else {
+          messages.push(`${battAvail} × ${bType} in stock.`);
+        }
+        battPrice = sumBatteryPrice(state.batteryUnits, bType, ev.locationId, bCount);
+      }
+
+      let chgPrice = 0;
+      if (hasCharger) {
+        const chgAvail = availableChargerCount(state.chargerUnits, Number(chgWatt), ev.locationId);
+        if (chgAvail < 1) {
+          ok = false;
+          messages.push(`No ${chgWatt}W charger available.`);
+        } else {
+          messages.push(`${chgAvail} × ${chgWatt}W charger in stock.`);
+        }
+        chgPrice = firstChargerPrice(state.chargerUnits, Number(chgWatt), ev.locationId);
+      }
+
+      if (!hasBattery && !hasCharger) {
+        messages.push('Selling vehicle without battery or charger.');
+      }
+
+      availHost.innerHTML = `<div class="${ok ? 'form-note' : 'form-error'}">${icon(ok ? 'checkCircle' : 'alert')}<span>${messages.join(' ')}</span></div>`;
       priceInput.value = Math.round((ev.sellingPrice || 0) + battPrice + chgPrice);
     }
 
     populateEvs();
     locSel.addEventListener('change', populateEvs);
-    evSel.addEventListener('change', () => { const w = evSel.selectedOptions[0]?.dataset.wattage; if (w) wattSel.value = w; updatePreview(); });
-    wattSel.addEventListener('change', updatePreview);
-    countSel.addEventListener('change', updatePreview);
+    evSel.addEventListener('change', updatePreview);
+    bTypeSel.addEventListener('change', updatePreview);
+    bCountInput.addEventListener('input', updatePreview);
+    chgSel.addEventListener('change', updatePreview);
   }
 
-  if (type === 'battery' || type === 'charger') {
+  if (type === 'battery') {
     const locs = state.locations;
     const defaultLoc = state.locationFilter !== 'all' ? state.locationFilter : (locs[0]?.id || '');
     host.innerHTML = `
@@ -316,34 +409,110 @@ function renderFields(host, type, state) {
           </div>
         </div>
         <div class="field">
-          <label>Wattage</label>
+          <label>Battery Type</label>
           <div class="select-wrap">
-            <select name="wattage" id="u-watt">
-              ${WATTAGES.map(w => `<option value="${w}">${w}W</option>`).join('')}
+            <select name="batteryType" id="u-batt-type">
+              ${BATTERY_TYPES.map(t => `<option value="${t}">${t} (12W)</option>`).join('')}
             </select>
             ${icon('chevronDown')}
           </div>
         </div>
+        <div class="field">
+          <label>Quantity <span class="hint" id="u-qty-hint">(1 × 12W = 12W)</span></label>
+          <input name="qty" id="u-qty" type="number" min="1" step="1" value="1" required>
+        </div>
+        <div></div>
         <div class="field field--full" id="u-availability"></div>
         <div class="field field--full">
           <label>Sale price <span class="hint">(auto-filled, editable)</span></label>
           <input name="price" id="u-price" type="number" min="0" step="1">
         </div>
       </div>`;
+
+    const locSel = $('#u-loc', host);
+    const typeSel = $('#u-batt-type', host);
+    const qtyInput = $('#u-qty', host);
+    const hint = $('#u-qty-hint', host);
+    const availHost = $('#u-availability', host);
+    const priceInput = $('#u-price', host);
+
+    function update() {
+      const bType = typeSel.value;
+      const qty = Math.max(1, Number(qtyInput.value) || 1);
+      hint.textContent = `(${qty} × 12W = ${qty * BATTERY_UNIT_WATTAGE}W combined)`;
+
+      const avail = availableBatteryCount(state.batteryUnits, bType, locSel.value);
+      const ok = avail >= qty;
+      availHost.innerHTML = ok
+        ? `<div class="form-note">${icon('checkCircle')}<span>${avail} in stock at this location.</span></div>`
+        : `<div class="form-error">${icon('alert')}<span>Only ${avail} in stock at this location (need ${qty}).</span></div>`;
+
+      const unitPrice = firstBatteryPrice(state.batteryUnits, bType, locSel.value);
+      priceInput.value = Math.round(unitPrice * qty);
+    }
+    update();
+    locSel.addEventListener('change', update);
+    typeSel.addEventListener('change', update);
+    qtyInput.addEventListener('input', update);
+  }
+
+  if (type === 'charger') {
+    const locs = state.locations;
+    const defaultLoc = state.locationFilter !== 'all' ? state.locationFilter : (locs[0]?.id || '');
+    host.innerHTML = `
+      <div class="form-grid">
+        <div class="field">
+          <label>Shop location</label>
+          <div class="select-wrap">
+            <select name="locationId" id="u-loc">
+              ${locs.map(l => `<option value="${l.id}" ${l.id === defaultLoc ? 'selected' : ''}>${escapeHtml(l.name)}</option>`).join('')}
+            </select>
+            ${icon('chevronDown')}
+          </div>
+        </div>
+        <div class="field">
+          <label>Charger Wattage</label>
+          <div class="select-wrap">
+            <select name="wattage" id="u-watt">
+              ${CHARGER_WATTAGES.map(w => `<option value="${w}">${w}W</option>`).join('')}
+            </select>
+            ${icon('chevronDown')}
+          </div>
+        </div>
+        <div class="field">
+          <label>Quantity</label>
+          <input name="qty" id="u-qty" type="number" min="1" step="1" value="1" required>
+        </div>
+        <div></div>
+        <div class="field field--full" id="u-availability"></div>
+        <div class="field field--full">
+          <label>Sale price <span class="hint">(auto-filled, editable)</span></label>
+          <input name="price" id="u-price" type="number" min="0" step="1">
+        </div>
+      </div>`;
+
     const locSel = $('#u-loc', host);
     const wattSel = $('#u-watt', host);
+    const qtyInput = $('#u-qty', host);
+    const availHost = $('#u-availability', host);
+    const priceInput = $('#u-price', host);
+
     function update() {
-      const units = (type === 'battery' ? state.batteryUnits : state.chargerUnits)
-        .filter(u => u.status === STATUS.IN_STOCK && u.locationId === locSel.value && String(u.wattage) === wattSel.value);
-      const availHost = $('#u-availability', host);
-      availHost.innerHTML = units.length
-        ? `<div class="form-note">${icon('checkCircle')}<span>${units.length} in stock at this location.</span></div>`
-        : `<div class="form-error">${icon('alert')}<span>None in stock at this location.</span></div>`;
-      $('#u-price', host).value = units[0]?.sellingPrice ?? 0;
+      const watt = Number(wattSel.value);
+      const qty = Math.max(1, Number(qtyInput.value) || 1);
+      const avail = availableChargerCount(state.chargerUnits, watt, locSel.value);
+      const ok = avail >= qty;
+      availHost.innerHTML = ok
+        ? `<div class="form-note">${icon('checkCircle')}<span>${avail} in stock at this location.</span></div>`
+        : `<div class="form-error">${icon('alert')}<span>Only ${avail} in stock at this location (need ${qty}).</span></div>`;
+
+      const unitPrice = firstChargerPrice(state.chargerUnits, watt, locSel.value);
+      priceInput.value = Math.round(unitPrice * qty);
     }
     update();
     locSel.addEventListener('change', update);
     wattSel.addEventListener('change', update);
+    qtyInput.addEventListener('input', update);
   }
 
   if (type === 'sparepart') {
@@ -384,17 +553,23 @@ function renderFields(host, type, state) {
   }
 }
 
-function availableCount(units, wattage, locationId, evId) {
-  return units.filter(u => u.status === STATUS.IN_STOCK && u.wattage === wattage && u.locationId === locationId).length;
+function availableBatteryCount(units, batteryType, locationId) {
+  return units.filter(u => u.status === STATUS.IN_STOCK && u.locationId === locationId && ((u.batteryType || 'Lead Battery') === batteryType)).length;
 }
-function sumSellingPrice(units, wattage, locationId, evId, count) {
-  const list = units.filter(u => u.status === STATUS.IN_STOCK && u.wattage === wattage && u.locationId === locationId);
-  list.sort((a, b) => (b.linkedEvId === evId ? 1 : 0) - (a.linkedEvId === evId ? 1 : 0));
+function sumBatteryPrice(units, batteryType, locationId, count) {
+  const list = units.filter(u => u.status === STATUS.IN_STOCK && u.locationId === locationId && ((u.batteryType || 'Lead Battery') === batteryType));
   return list.slice(0, count).reduce((s, u) => s + (u.sellingPrice || 0), 0);
 }
-function firstSellingPrice(units, wattage, locationId, evId) {
-  const list = units.filter(u => u.status === STATUS.IN_STOCK && u.wattage === wattage && u.locationId === locationId);
-  list.sort((a, b) => (b.linkedEvId === evId ? 1 : 0) - (a.linkedEvId === evId ? 1 : 0));
+function firstBatteryPrice(units, batteryType, locationId) {
+  const list = units.filter(u => u.status === STATUS.IN_STOCK && u.locationId === locationId && ((u.batteryType || 'Lead Battery') === batteryType));
+  return list[0]?.sellingPrice || 0;
+}
+
+function availableChargerCount(units, wattage, locationId) {
+  return units.filter(u => u.status === STATUS.IN_STOCK && u.locationId === locationId && Number(u.wattage) === Number(wattage)).length;
+}
+function firstChargerPrice(units, wattage, locationId) {
+  const list = units.filter(u => u.status === STATUS.IN_STOCK && u.locationId === locationId && Number(u.wattage) === Number(wattage));
   return list[0]?.sellingPrice || 0;
 }
 
@@ -414,3 +589,4 @@ async function offerInvoice(saleId) {
     closeModal();
   });
 }
+

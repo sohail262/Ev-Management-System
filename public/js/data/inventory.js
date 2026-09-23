@@ -21,32 +21,43 @@ export function listenEvUnits(cb) {
   return onSnapshot(evCol, (snap) => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
-export async function addEvUnitWithBundle({
-  providerId, model, chassisNo, locationId, costPrice, sellingPrice, bundleWattage,
-  bundleBatteryCost = 0, bundleBatteryPrice = 0, bundleChargerCost = 0, bundleChargerPrice = 0
+export async function addEvUnits({
+  providerId, model = '', chassisNos = [], locationId, costPrice, sellingPrice, qty = 1
 }) {
   const batch = writeBatch(db);
-  const evRef = doc(evCol);
-  const batteryRef = doc(batteryCol);
-  const chargerRef = doc(chargerCol);
-
-  batch.set(batteryRef, {
-    wattage: bundleWattage, costPrice: bundleBatteryCost, sellingPrice: bundleBatteryPrice,
-    locationId, source: 'bundle', linkedEvId: evRef.id, status: STATUS.IN_STOCK, dateAdded: serverTimestamp()
+  const ids = [];
+  for (let i = 0; i < qty; i++) {
+    const evRef = doc(evCol);
+    const chassisNo = (chassisNos[i] || '').trim();
+    batch.set(evRef, {
+      providerId,
+      model: (model || '').trim(),
+      chassisNo,
+      locationId,
+      costPrice: Number(costPrice) || 0,
+      sellingPrice: Number(sellingPrice) || 0,
+      status: STATUS.IN_STOCK,
+      dateAdded: serverTimestamp()
+    });
+    ids.push(evRef.id);
+  }
+  addStockLog(batch, {
+    type: 'add',
+    itemType: 'ev',
+    label: `${qty} × ${model || 'EV'} added`,
+    locationId,
+    qty
   });
-  batch.set(chargerRef, {
-    wattage: bundleWattage, costPrice: bundleChargerCost, sellingPrice: bundleChargerPrice,
-    locationId, source: 'bundle', linkedEvId: evRef.id, status: STATUS.IN_STOCK, dateAdded: serverTimestamp()
-  });
-  batch.set(evRef, {
-    providerId, model: model || '', chassisNo: chassisNo || '', locationId,
-    costPrice, sellingPrice, bundleWattage,
-    bundleBatteryUnitId: batteryRef.id, bundleChargerUnitId: chargerRef.id,
-    status: STATUS.IN_STOCK, dateAdded: serverTimestamp()
-  });
-  addStockLog(batch, { type: 'add', itemType: 'ev', label: `EV added${chassisNo ? ` (${chassisNo})` : ''}`, locationId });
   await batch.commit();
-  return evRef.id;
+  return ids;
+}
+
+// Compatibility exports for backwards compatibility and browser caches
+export async function addEvUnit(data) {
+  return addEvUnits(data);
+}
+export async function addEvUnitWithBundle(data) {
+  return addEvUnits(data);
 }
 
 export function updateEvUnit(id, data) {
@@ -54,21 +65,60 @@ export function updateEvUnit(id, data) {
 }
 
 export async function deleteEvUnit(ev) {
-  const batch = writeBatch(db);
-  batch.delete(doc(evCol, ev.id));
-  if (ev.bundleBatteryUnitId) batch.delete(doc(batteryCol, ev.bundleBatteryUnitId));
-  if (ev.bundleChargerUnitId) batch.delete(doc(chargerCol, ev.bundleChargerUnitId));
-  await batch.commit();
+  await deleteDoc(doc(evCol, ev.id));
 }
 
-export async function transferEvUnit(ev, toLocationId, note = '') {
+export async function transferEvUnit(ev, toLocationId, note = '', qty = 1) {
   const batch = writeBatch(db);
-  batch.update(doc(evCol, ev.id), { locationId: toLocationId });
-  if (ev.bundleBatteryUnitId) batch.update(doc(batteryCol, ev.bundleBatteryUnitId), { locationId: toLocationId });
-  if (ev.bundleChargerUnitId) batch.update(doc(chargerCol, ev.bundleChargerUnitId), { locationId: toLocationId });
-  addStockLog(batch, { type: 'transfer', itemType: 'ev', label: `EV transferred${ev.chassisNo ? ` (${ev.chassisNo})` : ''}`, locationId: ev.locationId, toLocationId, note });
-  logTransfer(batch, { itemType: 'ev', itemId: ev.id, fromLocationId: ev.locationId, toLocationId, note });
+  const fromLoc = ev.locationId;
+  const numQty = Math.max(1, parseInt(qty) || 1);
+
+  let evsToTransfer = [ev];
+  if (numQty > 1) {
+    const q = query(
+      evCol,
+      where('status', '==', STATUS.IN_STOCK),
+      where('locationId', '==', fromLoc),
+      where('providerId', '==', ev.providerId)
+    );
+    const snap = await getDocs(q);
+    const matches = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(e => (e.model || '').trim().toLowerCase() === (ev.model || '').trim().toLowerCase());
+
+    const otherMatches = matches.filter(e => e.id !== ev.id);
+    evsToTransfer = [ev, ...otherMatches].slice(0, numQty);
+  }
+
+  evsToTransfer.forEach(e => {
+    batch.update(doc(evCol, e.id), { locationId: toLocationId });
+  });
+
+  const count = evsToTransfer.length;
+  const label = `${count} × ${ev.model || 'EV'} transferred`;
+  addStockLog(batch, {
+    type: 'transfer',
+    itemType: 'ev',
+    label,
+    locationId: fromLoc,
+    toLocationId,
+    qty: count,
+    note
+  });
+
+  logTransfer(batch, {
+    itemType: 'ev',
+    itemLabel: `${ev.model || 'EV'}`,
+    qty: count,
+    itemId: ev.id,
+    itemIds: evsToTransfer.map(e => e.id),
+    fromLocationId: fromLoc,
+    toLocationId,
+    note
+  });
+
   await batch.commit();
+  return count;
 }
 
 // ================= BATTERY / CHARGER UNITS =================
@@ -76,17 +126,51 @@ export function listenUnits(type, cb) {
   return onSnapshot(unitCol(type), (snap) => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
-export async function addUnits(type, { wattage, costPrice, sellingPrice, locationId, qty = 1 }) {
+export async function addUnits(type, { wattage, batteryType, costPrice, sellingPrice, locationId, qty = 1 }) {
   const batch = writeBatch(db);
   const col = unitCol(type);
-  for (let i = 0; i < qty; i++) {
+  const isBattery = type === 'battery';
+  const cleanBattType = batteryType || 'Lead Battery';
+  const cleanWattage = Number(wattage) || 48;
+  const numQty = Math.max(1, parseInt(qty) || 1);
+
+  for (let i = 0; i < numQty; i++) {
     const ref = doc(col);
-    batch.set(ref, {
-      wattage, costPrice, sellingPrice, locationId, source: 'stock',
-      status: STATUS.IN_STOCK, dateAdded: serverTimestamp()
-    });
+    const data = {
+      costPrice: Number(costPrice) || 0,
+      sellingPrice: Number(sellingPrice) || 0,
+      locationId,
+      source: 'stock',
+      status: STATUS.IN_STOCK,
+      dateAdded: serverTimestamp()
+    };
+    if (isBattery) {
+      data.batteryType = cleanBattType;
+      data.unitWattage = 12; // Each battery is of 12W
+    } else {
+      data.wattage = cleanWattage;
+    }
+    batch.set(ref, data);
   }
-  addStockLog(batch, { type: 'add', itemType: type, label: `${qty} × ${wattage}W ${type} added`, locationId, qty });
+
+  const logLabel = isBattery
+    ? `${numQty} × ${cleanBattType} added (${numQty * 12}W combined)`
+    : `${numQty} × ${cleanWattage}W Charger added`;
+
+  addStockLog(batch, { type: 'add', itemType: type, label: logLabel, locationId, qty: numQty });
+  await batch.commit();
+}
+
+export async function deleteEvUnitsBatch(evIds) {
+  const batch = writeBatch(db);
+  evIds.forEach(id => batch.delete(doc(evCol, id)));
+  await batch.commit();
+}
+
+export async function deleteUnitsBatch(type, unitIds) {
+  const batch = writeBatch(db);
+  const col = unitCol(type);
+  unitIds.forEach(id => batch.delete(doc(col, id)));
   await batch.commit();
 }
 
@@ -98,22 +182,141 @@ export async function deleteUnit(type, id) {
   await deleteDoc(doc(unitCol(type), id));
 }
 
-export async function transferUnit(type, unit, toLocationId, note = '') {
+export async function transferUnit(type, unit, toLocationId, note = '', qty = 1) {
   const batch = writeBatch(db);
-  batch.update(doc(unitCol(type), unit.id), { locationId: toLocationId });
-  addStockLog(batch, { type: 'transfer', itemType: type, label: `${unit.wattage}W ${type} transferred`, locationId: unit.locationId, toLocationId, note });
-  logTransfer(batch, { itemType: type, itemId: unit.id, fromLocationId: unit.locationId, toLocationId, note });
+  const col = unitCol(type);
+  const fromLoc = unit.locationId;
+  const isBattery = type === 'battery';
+  const desc = isBattery
+    ? (unit.batteryType || `${unit.wattage || 12}W Battery`)
+    : `${unit.wattage}W Charger`;
+  const numQty = Math.max(1, parseInt(qty) || 1);
+
+  let unitsToTransfer = [unit];
+  if (numQty > 1) {
+    const q = query(col, where('status', '==', STATUS.IN_STOCK), where('locationId', '==', fromLoc));
+    const snap = await getDocs(q);
+    let matches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (isBattery) {
+      matches = matches.filter(u => (u.batteryType || 'Lead Battery') === (unit.batteryType || 'Lead Battery'));
+    } else {
+      matches = matches.filter(u => Number(u.wattage) === Number(unit.wattage));
+    }
+    const otherMatches = matches.filter(u => u.id !== unit.id);
+    unitsToTransfer = [unit, ...otherMatches].slice(0, numQty);
+  }
+
+  unitsToTransfer.forEach(u => {
+    batch.update(doc(col, u.id), { locationId: toLocationId });
+  });
+
+  const count = unitsToTransfer.length;
+  const label = `${count} × ${desc} transferred`;
+  addStockLog(batch, {
+    type: 'transfer',
+    itemType: type,
+    label,
+    locationId: fromLoc,
+    toLocationId,
+    qty: count,
+    note
+  });
+
+  logTransfer(batch, {
+    itemType: type,
+    itemLabel: desc,
+    qty: count,
+    itemId: unit.id,
+    itemIds: unitsToTransfer.map(u => u.id),
+    fromLocationId: fromLoc,
+    toLocationId,
+    note
+  });
+
   await batch.commit();
+  return count;
 }
 
-export async function findAvailableUnits(type, { wattage, locationId, count, preferLinkedEvId }) {
+export async function createDirectTransfer({ itemType, providerId, model, batteryType, wattage, fromLocationId, toLocationId, qty = 1, note = '' }) {
+  const batch = writeBatch(db);
+  const numQty = Math.max(1, parseInt(qty) || 1);
+  let label = '';
+  let transferredIds = [];
+
+  if (itemType === 'ev') {
+    const q = query(evCol, where('status', '==', STATUS.IN_STOCK), where('locationId', '==', fromLocationId));
+    const snap = await getDocs(q);
+    let matches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (providerId) matches = matches.filter(e => e.providerId === providerId);
+    if (model) matches = matches.filter(e => (e.model || '').trim().toLowerCase() === model.trim().toLowerCase());
+    if (matches.length < numQty) {
+      throw new Error(`Only ${matches.length} unit(s) available in stock to transfer.`);
+    }
+    const toMove = matches.slice(0, numQty);
+    toMove.forEach(e => batch.update(doc(evCol, e.id), { locationId: toLocationId }));
+    transferredIds = toMove.map(e => e.id);
+    label = `${numQty} × ${model || 'EV'}`;
+  } else {
+    const col = unitCol(itemType);
+    const isBattery = itemType === 'battery';
+    const q = query(col, where('status', '==', STATUS.IN_STOCK), where('locationId', '==', fromLocationId));
+    const snap = await getDocs(q);
+    let matches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (isBattery) {
+      matches = matches.filter(u => (u.batteryType || 'Lead Battery') === (batteryType || 'Lead Battery'));
+      label = `${numQty} × ${batteryType || 'Lead Battery'}`;
+    } else {
+      matches = matches.filter(u => Number(u.wattage) === Number(wattage));
+      label = `${numQty} × ${wattage}W Charger`;
+    }
+    if (matches.length < numQty) {
+      throw new Error(`Only ${matches.length} unit(s) available in stock to transfer.`);
+    }
+    const toMove = matches.slice(0, numQty);
+    toMove.forEach(u => batch.update(doc(col, u.id), { locationId: toLocationId }));
+    transferredIds = toMove.map(u => u.id);
+  }
+
+  addStockLog(batch, {
+    type: 'transfer',
+    itemType,
+    label: `${label} transferred`,
+    locationId: fromLocationId,
+    toLocationId,
+    qty: numQty,
+    note
+  });
+
+  logTransfer(batch, {
+    itemType,
+    itemLabel: label.replace(/^\d+ × /, ''),
+    qty: numQty,
+    itemIds: transferredIds,
+    fromLocationId,
+    toLocationId,
+    note
+  });
+
+  await batch.commit();
+  return transferredIds;
+}
+
+export async function findAvailableUnits(type, { wattage, batteryType, locationId, count }) {
   const col = unitCol(type);
-  const q = query(col, where('status', '==', STATUS.IN_STOCK), where('wattage', '==', wattage), where('locationId', '==', locationId));
+  const q = query(col, where('status', '==', STATUS.IN_STOCK), where('locationId', '==', locationId));
   const snap = await getDocs(q);
   let units = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  if (preferLinkedEvId) {
-    units.sort((a, b) => (b.linkedEvId === preferLinkedEvId ? 1 : 0) - (a.linkedEvId === preferLinkedEvId ? 1 : 0));
+
+  if (type === 'battery') {
+    if (batteryType) {
+      units = units.filter(u => (u.batteryType === batteryType) || (!u.batteryType && batteryType.includes('Lead')));
+    }
+  } else if (type === 'charger') {
+    if (wattage) {
+      units = units.filter(u => Number(u.wattage) === Number(wattage));
+    }
   }
+
   return units.slice(0, count);
 }
 
@@ -143,6 +346,45 @@ export async function restockSparePart(part, qty, note = 'Restock') {
   const logRef = doc(sparePartLogsCol);
   batch.set(logRef, { sparePartId: part.id, type: 'in', qty, date: serverTimestamp(), note });
   addStockLog(batch, { type: 'add', itemType: 'sparepart', label: `${part.name} restocked (+${qty})` });
+  await batch.commit();
+}
+
+export async function transferSparePart(part, toLocationId, qty = 1, note = '') {
+  const numQty = Math.max(1, parseInt(qty) || 1);
+  if ((part.quantity || 0) < numQty) {
+    throw new Error(`Only ${part.quantity || 0} pcs available in stock.`);
+  }
+  const batch = writeBatch(db);
+  batch.update(doc(sparePartsCol, part.id), {
+    quantity: (part.quantity || 0) - numQty
+  });
+  const logRef = doc(sparePartLogsCol);
+  batch.set(logRef, {
+    sparePartId: part.id,
+    type: 'out',
+    qty: numQty,
+    toLocationId,
+    date: serverTimestamp(),
+    note: `Transfer to ${toLocationId}: ${note}`
+  });
+  addStockLog(batch, {
+    type: 'transfer',
+    itemType: 'sparepart',
+    label: `${numQty} × ${part.name} transferred`,
+    locationId: 'loc_jadcherla',
+    toLocationId,
+    qty: numQty,
+    note
+  });
+  logTransfer(batch, {
+    itemType: 'sparepart',
+    itemLabel: part.name,
+    qty: numQty,
+    itemId: part.id,
+    fromLocationId: 'loc_jadcherla',
+    toLocationId,
+    note
+  });
   await batch.commit();
 }
 

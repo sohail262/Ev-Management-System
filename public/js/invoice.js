@@ -15,32 +15,83 @@ function plainDate(d) {
 
 function buildRows(sale, meta) {
   if (sale.type === 'ev') {
-    return [
+    const battTotal = sale.batteriesPrice || 0;
+    const chgTotal = sale.chargerPrice || 0;
+    const computedEvPrice = (sale.evPrice && sale.evPrice > 0)
+      ? sale.evPrice
+      : Math.max(0, (sale.price || 0) - battTotal - chgTotal);
+
+    const rows = [
       {
         desc: `${meta.providerName || 'EV'}${sale.model ? ' - ' + sale.model : ''}${sale.chassisNo ? `  (Chassis: ${sale.chassisNo})` : ''}`,
-        qty: 1, unit: sale.evPrice || 0, amount: sale.evPrice || 0
-      },
-      {
-        desc: `${sale.batteryWattage}W Battery`,
-        qty: sale.batteryCount || 1,
-        unit: sale.batteryCount ? (sale.batteriesPrice || 0) / sale.batteryCount : (sale.batteriesPrice || 0),
-        amount: sale.batteriesPrice || 0
-      },
-      {
-        desc: `${sale.batteryWattage}W Charger`,
-        qty: 1, unit: sale.chargerPrice || 0, amount: sale.chargerPrice || 0
+        qty: 1,
+        unit: computedEvPrice,
+        amount: computedEvPrice
       }
     ];
+
+    if (sale.hasBattery || (sale.batteryCount && sale.batteryCount > 0) || sale.batteryType || sale.batteryWattage) {
+      const bCount = sale.batteryCount || 1;
+      const bWatt = sale.batteryCombinedWattage || (sale.batteryWattage ? Number(sale.batteryWattage) : (bCount * 12));
+      const bType = sale.batteryType || (sale.batteryWattage ? `${sale.batteryWattage}W Battery` : 'Lead Battery');
+      rows.push({
+        desc: `${bType} (${bWatt}W combined - ${bCount}× 12W)`,
+        qty: bCount,
+        unit: bCount ? battTotal / bCount : battTotal,
+        amount: battTotal
+      });
+    }
+
+    if (sale.hasCharger || sale.chargerWattage || chgTotal > 0) {
+      const cWatt = sale.chargerWattage || sale.batteryWattage || 60;
+      rows.push({
+        desc: `${cWatt}W Charger`,
+        qty: 1,
+        unit: chgTotal,
+        amount: chgTotal
+      });
+    }
+
+    return rows;
   }
-  if (sale.type === 'sparepart') {
+
+  if (sale.type === 'battery') {
+    const qty = sale.qty || 1;
+    const bType = sale.batteryType || 'Lead Battery';
+    const bWatt = sale.batteryCombinedWattage || (sale.unitWattage ? qty * sale.unitWattage : qty * 12);
     return [{
-      desc: sale.sparePartName, qty: sale.qty,
-      unit: sale.qty ? sale.price / sale.qty : sale.price, amount: sale.price
+      desc: `${bType} (${bWatt}W combined - ${qty}× 12W)`,
+      qty,
+      unit: qty ? (sale.price || 0) / qty : (sale.price || 0),
+      amount: sale.price || 0
     }];
   }
+
+  if (sale.type === 'charger') {
+    const qty = sale.qty || 1;
+    const cWatt = sale.wattage || sale.chargerWattage || 60;
+    return [{
+      desc: `${cWatt}W Charger`,
+      qty,
+      unit: qty ? (sale.price || 0) / qty : (sale.price || 0),
+      amount: sale.price || 0
+    }];
+  }
+
+  if (sale.type === 'sparepart') {
+    return [{
+      desc: sale.sparePartName || 'Spare Part',
+      qty: sale.qty || 1,
+      unit: sale.qty ? (sale.price || 0) / sale.qty : (sale.price || 0),
+      amount: sale.price || 0
+    }];
+  }
+
   return [{
-    desc: `${sale.wattage}W ${sale.type === 'battery' ? 'Battery' : 'Charger'}`,
-    qty: 1, unit: sale.price, amount: sale.price
+    desc: `${sale.type || 'Item'}`,
+    qty: 1,
+    unit: sale.price || 0,
+    amount: sale.price || 0
   }];
 }
 

@@ -21,6 +21,7 @@ function render(root) {
   const sparePartsValue = state.spareParts.reduce((s, p) => s + (p.quantity || 0) * (p.sellingPrice || 0), 0);
 
   const salesInScope = state.sales.filter(s => inLocation(s, lf));
+  const expensesInScope = (state.expenses || []).filter(e => inLocation(e, lf));
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -30,7 +31,13 @@ function render(root) {
   const monthSales = salesInScope.filter(s => s.date && toDate(s.date) >= startOfMonth);
   const todayRevenue = todaySales.reduce((s, x) => s + (x.price || 0), 0);
   const monthRevenue = monthSales.reduce((s, x) => s + (x.price || 0), 0);
-  const monthProfit = monthSales.reduce((s, x) => s + (x.profit || 0), 0);
+  const monthGrossProfit = monthSales.reduce((s, x) => s + (x.profit || 0), 0);
+
+  const todayExpenses = expensesInScope.filter(e => e.date && toDate(e.date) >= startOfDay);
+  const monthExpenses = expensesInScope.filter(e => e.date && toDate(e.date) >= startOfMonth);
+  const todayExpenseTotal = todayExpenses.reduce((s, x) => s + (x.amount || 0), 0);
+  const monthExpenseTotal = monthExpenses.reduce((s, x) => s + (x.amount || 0), 0);
+  const monthNetProfit = monthGrossProfit - monthExpenseTotal;
 
   const alerts = lowStockAlerts(state, lf);
   const recentSales = [...salesInScope].sort((a, b) => toDate(b.date) - toDate(a.date)).slice(0, 6);
@@ -40,17 +47,18 @@ function render(root) {
     <div class="view-header">
       <div>
         <h2>Dashboard</h2>
-        <p>${scopeLabel} · live overview of stock and sales</p>
+        <p>${scopeLabel} · live overview of stock, sales and expenses</p>
       </div>
     </div>
 
     <div class="kpi-grid">
       ${kpi('ev', 'EVs in stock', evInStock.length, `${state.evUnits.filter(e=>inLocation(e,lf)).length} total added`)}
-      ${kpi('battery', 'Batteries in stock', batteriesInStock.length, `across ${new Set(batteriesInStock.map(b=>b.wattage)).size || 0} wattages`)}
+      ${kpi('battery', 'Batteries in stock', batteriesInStock.length, `across ${new Set(batteriesInStock.map(b=>b.batteryType || 'Lead Battery')).size || 0} types`)}
       ${kpi('charger', 'Chargers in stock', chargersInStock.length, `across ${new Set(chargersInStock.map(c=>c.wattage)).size || 0} wattages`)}
       ${kpi('package', 'Spare parts', sparePartsQty, `${formatMoney(sparePartsValue)} stock value`)}
-      ${kpi('wallet', "Today's revenue", formatMoney(todayRevenue), `${todaySales.length} sale${todaySales.length===1?'':'s'} today`, 'info')}
-      ${kpi('reports', "This month's revenue", formatMoney(monthRevenue), `${formatMoney(monthProfit)} profit`, 'info')}
+      ${kpi('sales', "Today's revenue", formatMoney(todayRevenue), `${todaySales.length} sale${todaySales.length===1?'':'s'} today`, 'info')}
+      ${kpi('wallet', "Today's expenses", formatMoney(todayExpenseTotal), `${todayExpenses.length} expense${todayExpenses.length===1?'':'s'} today`, todayExpenseTotal > 0 ? 'warn' : '')}
+      ${kpi('reports', "This month net profit", formatMoney(monthNetProfit), `${formatMoney(monthRevenue)} rev · ${formatMoney(monthExpenseTotal)} exp`, 'info')}
       ${kpi('alert', 'Low stock alerts', alerts.length, alerts.length ? 'needs attention' : 'all good', alerts.length ? 'warn' : '')}
     </div>
 
@@ -122,11 +130,13 @@ function emptyRow(iconName, title, message) {
 }
 
 function logIcon(type) {
-  return { add: 'plus', sale: 'sales', transfer: 'transfer', adjust: 'edit' }[type] || 'boxes';
+  return { add: 'plus', sale: 'sales', transfer: 'transfer', adjust: 'edit', expense: 'wallet' }[type] || 'boxes';
 }
 
 function saleLabel(s) {
-  if (s.type === 'ev') return `${providerName(s.providerId)} EV${s.customerName ? ` — ${s.customerName}` : ''}`;
+  if (s.type === 'ev') return `${providerName(s.providerId)} EV${s.model ? ' ' + s.model : ''}${s.customerName ? ` — ${s.customerName}` : ''}`;
+  if (s.type === 'battery') return `${s.qty || 1}× ${s.batteryType || 'Lead Battery'}`;
+  if (s.type === 'charger') return `${s.qty || 1}× ${s.wattage}W Charger`;
   if (s.type === 'sparepart') return `${s.sparePartName} × ${s.qty}`;
-  return `${s.wattage}W ${s.type}`;
+  return `${s.type}`;
 }

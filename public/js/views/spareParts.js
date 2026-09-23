@@ -1,9 +1,9 @@
-import { getState, subscribe } from '../state.js';
+import { getState, subscribe, locationName } from '../state.js';
 import { icon } from '../icons.js';
 import { escapeHtml, formatMoney, formatDateTime, openModal, closeModal, confirmDialog, toast, debounce, $ } from '../utils.js';
 import { SPARE_PART_CATEGORIES } from '../constants.js';
 import {
-  addSparePart, updateSparePart, deleteSparePart, restockSparePart, listenSparePartLogs
+  addSparePart, updateSparePart, deleteSparePart, restockSparePart, transferSparePart, listenSparePartLogs
 } from '../data/inventory.js';
 
 let search = '';
@@ -44,12 +44,12 @@ function render(root) {
     <div id="parts-table"></div>
   `;
 
-  renderTable(items);
+  renderTable(items, state);
   $('#add-part-btn').addEventListener('click', () => openPartForm());
   $('#search-input').addEventListener('input', debounce((e) => { search = e.target.value; render(root); }, 200));
 }
 
-function renderTable(items) {
+function renderTable(items, state) {
   const host = $('#parts-table');
   if (!items.length) {
     host.innerHTML = `<div class="card"><div class="empty-state">${icon('package', 'empty-state__icon')}<h4>No spare parts yet</h4><p>Add spare parts to start tracking stock.</p></div></div>`;
@@ -71,6 +71,7 @@ function renderTable(items) {
               <td data-label="Cost" class="num">${formatMoney(p.costPrice)}</td>
               <td data-label="Selling" class="num">${formatMoney(p.sellingPrice)}</td>
               <td class="cell-actions">
+                ${(p.quantity || 0) > 0 ? `<button class="icon-btn" data-transfer="${p.id}" title="Transfer to shop">${icon('transfer')}</button>` : ''}
                 <button class="icon-btn" data-restock="${p.id}" title="Restock">${icon('plus')}</button>
                 <button class="icon-btn" data-log="${p.id}" title="Stock history">${icon('reports')}</button>
                 <button class="icon-btn" data-edit="${p.id}" title="Edit">${icon('edit')}</button>
@@ -83,6 +84,7 @@ function renderTable(items) {
     </div>`;
 
   items.forEach(p => {
+    $(`[data-transfer="${p.id}"]`, host)?.addEventListener('click', () => openSparePartTransferModal(state, p));
     $(`[data-restock="${p.id}"]`, host)?.addEventListener('click', () => openRestockForm(p));
     $(`[data-log="${p.id}"]`, host)?.addEventListener('click', () => openLogModal(p));
     $(`[data-edit="${p.id}"]`, host)?.addEventListener('click', () => openPartForm(p));
@@ -92,6 +94,59 @@ function renderTable(items) {
         catch (err) { toast(err.message, 'error'); }
       }
     });
+  });
+}
+
+function openSparePartTransferModal(state, part) {
+  const locations = state.locations;
+  const maxQty = part.quantity || 0;
+
+  const modal = openModal({
+    title: `Transfer ${part.name}`,
+    size: 'sm',
+    bodyHtml: `
+      <form id="spare-transfer-form">
+        <p class="confirm-text mb-3">
+          Transfer from Central Warehouse (${maxQty} pcs available).
+        </p>
+        <div class="field mb-3">
+          <label>Quantity to transfer (pcs)</label>
+          <input name="qty" type="number" min="1" max="${maxQty}" value="1" required>
+          <div class="hint">Available in stock: ${maxQty} pcs</div>
+        </div>
+        <div class="field">
+          <label>Transfer to Showroom</label>
+          <div class="select-wrap">
+            <select name="toLocationId" required>
+              ${locations.map(l => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('')}
+            </select>
+            ${icon('chevronDown')}
+          </div>
+        </div>
+        <div class="field mt-3">
+          <label>Note <span class="hint">(optional)</span></label>
+          <input name="note" placeholder="Reason for transfer">
+        </div>
+      </form>`,
+    footerHtml: `
+      <button type="button" class="btn btn--ghost" data-close-modal>Cancel</button>
+      <button type="submit" form="spare-transfer-form" class="btn btn--primary">${icon('transfer')}<span>Transfer</span></button>`
+  });
+
+  $('#spare-transfer-form', modal).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const qty = Math.max(1, parseInt(fd.get('qty')) || 1);
+    const toLocationId = fd.get('toLocationId');
+    const note = (fd.get('note') || '').trim();
+
+    try {
+      await transferSparePart(part, toLocationId, qty, note);
+      closeModal();
+      toast(`${qty} pcs of ${part.name} transferred to ${locationName(toLocationId)}`, 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
   });
 }
 

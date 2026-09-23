@@ -23,22 +23,35 @@ export function paymentBadgeHtml(method) {
 export function lowStockAlerts(state, locationFilter) {
   const alerts = [];
 
-  ['battery', 'charger'].forEach((type) => {
-    const units = (type === 'battery' ? state.batteryUnits : state.chargerUnits)
-      .filter(u => u.status === STATUS.IN_STOCK && inLocation(u, locationFilter));
-    const groups = groupBy(units, u => `${u.locationId}|${u.wattage}`);
-    for (const [key, items] of groups.entries()) {
-      const [locationId, wattage] = key.split('|');
-      if (items.length < LOW_STOCK_THRESHOLDS[type]) {
-        alerts.push({
-          itemType: type,
-          title: `${wattage}W ${type === 'battery' ? 'Batteries' : 'Chargers'} low`,
-          sub: locationName(locationId),
-          count: items.length
-        });
-      }
+  // Battery low stock (by battery type per location)
+  const battUnits = state.batteryUnits.filter(u => u.status === STATUS.IN_STOCK && inLocation(u, locationFilter));
+  const battGroups = groupBy(battUnits, u => `${u.locationId}|${u.batteryType || 'Lead Battery'}`);
+  for (const [key, items] of battGroups.entries()) {
+    const [locationId, bType] = key.split('|');
+    if (items.length < LOW_STOCK_THRESHOLDS.battery) {
+      alerts.push({
+        itemType: 'battery',
+        title: `${bType} low`,
+        sub: locationName(locationId),
+        count: items.length
+      });
     }
-  });
+  }
+
+  // Charger low stock (by wattage per location)
+  const chgUnits = state.chargerUnits.filter(u => u.status === STATUS.IN_STOCK && inLocation(u, locationFilter));
+  const chgGroups = groupBy(chgUnits, u => `${u.locationId}|${u.wattage}`);
+  for (const [key, items] of chgGroups.entries()) {
+    const [locationId, wattage] = key.split('|');
+    if (items.length < LOW_STOCK_THRESHOLDS.charger) {
+      alerts.push({
+        itemType: 'charger',
+        title: `${wattage}W Chargers low`,
+        sub: locationName(locationId),
+        count: items.length
+      });
+    }
+  }
 
   const evs = state.evUnits.filter(e => e.status === STATUS.IN_STOCK && inLocation(e, locationFilter));
   const evGroups = groupBy(evs, e => `${e.locationId}|${e.providerId}`);

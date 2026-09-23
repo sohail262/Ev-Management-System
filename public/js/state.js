@@ -3,14 +3,15 @@ import { listenEvUnits, listenUnits, listenSpareParts } from './data/inventory.j
 import { listenSales } from './data/sales.js';
 import { listenTransfers } from './data/transfers.js';
 import { listenStockLog } from './data/log.js';
+import { listenExpenses } from './data/expenses.js';
 
 const state = {
   locations: [], providers: [], evUnits: [], batteryUnits: [], chargerUnits: [],
-  spareParts: [], sales: [], transfers: [], stockLog: [],
+  spareParts: [], sales: [], transfers: [], expenses: [], stockLog: [],
   locationFilter: localStorage.getItem('ulike_location_filter') || 'all',
   ready: {
     locations: false, providers: false, ev: false, battery: false,
-    charger: false, spareParts: false, sales: false, transfers: false
+    charger: false, spareParts: false, sales: false, transfers: false, expenses: false
   }
 };
 
@@ -37,6 +38,7 @@ export function initState() {
     listenSpareParts(v => { state.spareParts = v; state.ready.spareParts = true; notify(); });
     listenSales(v => { state.sales = v; state.ready.sales = true; notify(); });
     listenTransfers(v => { state.transfers = v; state.ready.transfers = true; notify(); });
+    listenExpenses(v => { state.expenses = v; state.ready.expenses = true; notify(); });
     listenStockLog(v => { state.stockLog = v; notify(); });
   });
 }
