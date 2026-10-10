@@ -1,9 +1,10 @@
-import { getState, subscribe, locationName, providerName } from '../state.js';
+import { getState, subscribe, locationName, providerName, getProviderModels } from '../state.js';
 import { icon } from '../icons.js';
 import { escapeHtml, formatMoney, formatDate, openModal, closeModal, confirmDialog, toast, debounce, $ } from '../utils.js';
 import { STATUS } from '../constants.js';
 import { statusBadgeHtml, inLocation } from './helpers.js';
 import { addEvUnits, updateEvUnit, deleteEvUnit, deleteEvUnitsBatch, transferEvUnit } from '../data/inventory.js';
+import { addModelToProvider } from '../data/core.js';
 
 let filters = { search: '', providerId: 'all', status: 'in-stock' };
 let viewMode = 'grouped'; // 'grouped' (single row with quantity) or 'individual'
@@ -103,7 +104,7 @@ function renderGroupedTable(items, state) {
   const groupMap = new Map();
 
   items.forEach(e => {
-    const cleanModel = (e.model || 'Standard').trim();
+    const cleanModel = (e.model || 'Standard').trim().toUpperCase();
     const groupKey = `${e.providerId}__${cleanModel.toLowerCase()}__${e.locationId}`;
 
     if (!groupMap.has(groupKey)) {
@@ -494,6 +495,7 @@ function openIndividualTransferModal(state, ev) {
 
 function openEvForm(state, ev = null) {
   const isEdit = !!ev;
+  const initialProviderId = ev?.providerId || state.providers[0]?.id || '';
   const modal = openModal({
     title: isEdit ? 'Edit EV' : 'Add EV stock',
     size: 'lg',
@@ -503,15 +505,22 @@ function openEvForm(state, ev = null) {
           <div class="field">
             <label>Brand</label>
             <div class="select-wrap">
-              <select name="providerId" required>
-                ${state.providers.map(p => `<option value="${p.id}" ${ev?.providerId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+              <select name="providerId" id="ev-provider-select" required>
+                ${state.providers.map(p => `<option value="${p.id}" ${(ev?.providerId || initialProviderId) === p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
               </select>
               ${icon('chevronDown')}
             </div>
           </div>
           <div class="field">
-            <label>Model <span class="hint">(optional)</span></label>
-            <input name="model" value="${escapeHtml(ev?.model || '')}" placeholder="e.g. Zelio i-Praise+">
+            <label>Model <span class="hint">(select or add)</span></label>
+            <div class="select-wrap">
+              <select name="modelSelect" id="ev-model-select" required>
+              </select>
+              ${icon('chevronDown')}
+            </div>
+            <div id="ev-custom-model-wrap" style="display:none; margin-top:8px;">
+              <input type="text" id="ev-custom-model-input" placeholder="Type new model name in CAPS" style="text-transform:uppercase;">
+            </div>
           </div>
           ${!isEdit ? `
           <div class="field">
@@ -547,16 +556,94 @@ function openEvForm(state, ev = null) {
       <button type="submit" form="ev-form" class="btn btn--primary">${isEdit ? 'Save changes' : 'Add EV stock'}</button>`
   });
 
+  const provSelect = $('#ev-provider-select', modal);
+  const modelSelect = $('#ev-model-select', modal);
+  const customModelWrap = $('#ev-custom-model-wrap', modal);
+  const customModelInput = $('#ev-custom-model-input', modal);
+
+  function syncModelOptions(provId, targetModel = '') {
+    const models = getProviderModels(provId);
+    const upperTarget = (targetModel || '').trim().toUpperCase();
+    const matchesPredefined = upperTarget && models.some(m => m.toUpperCase() === upperTarget);
+    const isCustom = upperTarget && !matchesPredefined;
+
+    let html = `<option value="">-- Select Model --</option>`;
+    models.forEach(m => {
+      const isSelected = matchesPredefined && upperTarget === m.toUpperCase();
+      html += `<option value="${escapeHtml(m)}" ${isSelected ? 'selected' : ''}>${escapeHtml(m)}</option>`;
+    });
+    html += `<option value="__custom__" ${isCustom ? 'selected' : ''}>+ Other / Enter New Model...</option>`;
+    modelSelect.innerHTML = html;
+
+    if (isCustom) {
+      customModelWrap.style.display = 'block';
+      customModelInput.value = upperTarget;
+    } else {
+      customModelWrap.style.display = 'none';
+      customModelInput.value = '';
+    }
+  }
+
+  // Populate initially
+  syncModelOptions(provSelect.value, ev?.model || '');
+
+  // On provider change
+  provSelect.addEventListener('change', () => {
+    syncModelOptions(provSelect.value);
+  });
+
+  // On model select change
+  modelSelect.addEventListener('change', () => {
+    if (modelSelect.value === '__custom__') {
+      customModelWrap.style.display = 'block';
+      customModelInput.focus();
+    } else {
+      customModelWrap.style.display = 'none';
+    }
+  });
+
+  // Capitalize custom model typing
+  customModelInput.addEventListener('input', () => {
+    const s = customModelInput.selectionStart, e = customModelInput.selectionEnd;
+    customModelInput.value = customModelInput.value.toUpperCase();
+    customModelInput.setSelectionRange(s, e);
+  });
+
   $('#ev-form', modal).addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const submitBtn = $('[form="ev-form"]');
     submitBtn.disabled = true;
+
+    const chosenProviderId = fd.get('providerId');
+    const selectedModel = fd.get('modelSelect');
+    let finalModel = '';
+    if (selectedModel === '__custom__') {
+      finalModel = (customModelInput.value || '').trim().toUpperCase();
+      if (!finalModel) {
+        toast('Please enter a custom model name.', 'error');
+        submitBtn.disabled = false;
+        customModelInput.focus();
+        return;
+      }
+      try {
+        await addModelToProvider(chosenProviderId, finalModel);
+      } catch (err) { /* ignore duplicate */ }
+    } else {
+      finalModel = (selectedModel || '').trim().toUpperCase();
+      if (!finalModel) {
+        toast('Please select a model.', 'error');
+        submitBtn.disabled = false;
+        modelSelect.focus();
+        return;
+      }
+    }
+
     try {
       if (isEdit) {
         await updateEvUnit(ev.id, {
-          providerId: fd.get('providerId'),
-          model: fd.get('model').trim(),
+          providerId: chosenProviderId,
+          model: finalModel,
           chassisNo: fd.get('chassisNo').trim(),
           locationId: fd.get('locationId'),
           costPrice: Number(fd.get('costPrice')),
@@ -571,8 +658,8 @@ function openEvForm(state, ev = null) {
           : (rawChassis.trim() ? [rawChassis.trim()] : []);
 
         await addEvUnits({
-          providerId: fd.get('providerId'),
-          model: fd.get('model').trim(),
+          providerId: chosenProviderId,
+          model: finalModel,
           chassisNos,
           locationId: fd.get('locationId'),
           costPrice: Number(fd.get('costPrice')),
@@ -588,3 +675,4 @@ function openEvForm(state, ev = null) {
     }
   });
 }
+

@@ -33,12 +33,84 @@ export const SPARE_PART_CATEGORIES = [
   'Suspension', 'Lights & Indicators', 'Fasteners', 'Other'
 ];
 
+export const DEFAULT_BRAND_MODELS = {
+  mac: [
+    'WARRIOR',
+    'SPARK',
+    'IMPACT'
+  ],
+  goeen: [
+    'CHALO NEO',
+    'CHALO SMART PRO',
+    'CHALO SMART PLUS',
+    'CHALO SMART ECO FBG',
+    'CHALO 100',
+    'NJA7',
+    'NJA8',
+    'CHALO WAVE',
+    'GO-2',
+    'CHALO 1000 V2N',
+    'CHALO NEU'
+  ],
+  vedmotors: [
+    'SUNNY',
+    'NAMO',
+    'LIAM',
+    'CUTE',
+    'RUSH',
+    'SMILE'
+  ],
+  ekotejas: [
+    'ASTRA',
+    'JATAYU',
+    'PRIVE MINI',
+    'LEO',
+    'SHERO NEO',
+    'SHERO',
+    'PRIVE',
+    'AXEL PRO',
+    'EVXTRO',
+    'AXEL',
+    'MAX',
+    'RUGD 13',
+    'RUGD 100',
+    'RUGD 120',
+    'RUGD 121',
+    'RUGD 122',
+    'RUGD 123',
+    'RUGD 124',
+    'RUGD 150',
+    'RUGD 151',
+    'RUGD 152'
+  ],
+  zelio: [
+    'EEVA ECO',
+    'EEVA',
+    'EEVA ECO ZX',
+    'EEVA ZX+',
+    'EEVA ECO LX',
+    'LITTLE GRACY',
+    'GRACY I',
+    'GRACY+',
+    'GRACY PRO',
+    'GRACY',
+    'XMEN+',
+    'XMEN 2.0',
+    'MYSTERY',
+    'LEGENDER +',
+    'LEGENDER+ PREMIUM',
+    'LOGIX',
+    'LOGIX LOADER',
+    'TANGA'
+  ]
+};
+
 export const SEED_PROVIDERS = [
-  { id: 'zelio', name: 'Zelio' },
-  { id: 'ekotejas', name: 'EKO Tejas' },
-  { id: 'mac', name: 'MAC' },
-  { id: 'goeen', name: 'Goeen' },
-  { id: 'vedmotors', name: 'VED Motors' }
+  { id: 'zelio', name: 'Zelio', models: DEFAULT_BRAND_MODELS.zelio },
+  { id: 'ekotejas', name: 'EKO Tejas', models: DEFAULT_BRAND_MODELS.ekotejas },
+  { id: 'mac', name: 'MAC', models: DEFAULT_BRAND_MODELS.mac },
+  { id: 'goeen', name: 'Goeen', models: DEFAULT_BRAND_MODELS.goeen },
+  { id: 'vedmotors', name: 'VED Motors', models: DEFAULT_BRAND_MODELS.vedmotors }
 ];
 
 export const SEED_LOCATIONS = [

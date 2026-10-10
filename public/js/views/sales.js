@@ -2,12 +2,12 @@ import { getState, subscribe, locationName, providerName } from '../state.js';
 import { icon } from '../icons.js';
 import {
   escapeHtml, formatMoney, formatDateTime, todayInputValue, debounce,
-  openModal, closeModal, toast, $
+  openModal, closeModal, confirmDialog, toast, $
 } from '../utils.js';
 import { CHARGER_WATTAGES, BATTERY_TYPES, BATTERY_UNIT_WATTAGE, PAYMENT_METHODS, STATUS, MAIN_LOCATION_ID } from '../constants.js';
 import { inLocation } from './helpers.js';
-import { createEvSale, createUnitSale, createSparePartSale, getSale } from '../data/sales.js';
-import { generateInvoicePdf } from '../invoice.js?v=2.6';
+import { createEvSale, createUnitSale, createSparePartSale, getSale, deleteSale } from '../data/sales.js';
+import { generateInvoicePdf } from '../invoice.js?v=2.7';
 
 let filters = { type: 'all', search: '' };
 
@@ -92,6 +92,7 @@ function renderTable(items, state) {
               <td data-label="Date">${formatDateTime(s.date)}</td>
               <td class="cell-actions">
                 <button class="icon-btn" data-invoice="${s.id}" title="Download invoice">${icon('download')}</button>
+                <button class="icon-btn icon-btn--danger" data-del-sale="${s.id}" title="Delete sale & restore inventory">${icon('trash')}</button>
               </td>
             </tr>`).join('')}
         </tbody>
@@ -99,6 +100,17 @@ function renderTable(items, state) {
     </div>`;
   items.forEach(s => {
     $(`[data-invoice="${s.id}"]`, host)?.addEventListener('click', () => downloadInvoice(s));
+    $(`[data-del-sale="${s.id}"]`, host)?.addEventListener('click', async () => {
+      const inv = s.invoiceNo || 'this sale';
+      if (await confirmDialog(`Delete invoice "${inv}"? This will cancel the sale and restore all items back to stock.`)) {
+        try {
+          await deleteSale(s.id);
+          toast(`Sale ${inv} deleted & stock restored`, 'success');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      }
+    });
   });
 }
 

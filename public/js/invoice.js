@@ -163,6 +163,18 @@ export function generateInvoicePdf(sale, meta = {}) {
   y += 8;
 
   const rows = buildRows(sale, meta);
+  // The sale price is editable (discounts / negotiated price), so make the line items
+  // add up to the TOTAL printed below.
+  const itemsSum = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const adjustment = Math.round((Number(sale.price) || 0) - itemsSum);
+  if (adjustment !== 0) {
+    rows.push({
+      desc: adjustment < 0 ? 'Discount / price adjustment' : 'Additional charges / price adjustment',
+      qty: 1,
+      unit: adjustment,
+      amount: adjustment
+    });
+  }
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(30, 30, 30);

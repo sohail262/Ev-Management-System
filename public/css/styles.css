@@ -628,3 +628,86 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ---------------- Login View ---------------- */
+.login-view {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 25%, #e6f4ef 0%, #edf1f3 100%);
+  padding: var(--space-4);
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(20, 97, 79, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+  width: 100%;
+  max-width: 410px;
+  padding: var(--space-6) var(--space-5);
+  animation: fadein 0.3s var(--ease);
+}
+.login-header {
+  text-align: center;
+  margin-bottom: var(--space-5);
+}
+.login-brand-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  font-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+  box-shadow: 0 6px 16px rgba(20, 97, 79, 0.28);
+}
+.login-header h2 {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.login-header p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.btn--danger-text {
+  color: var(--danger) !important;
+}
+.btn--danger-text:hover {
+  background: var(--danger-soft) !important;
+}
+
+/* User Profile in Sidebar */
+.sidebar__user {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sidebar__user-email {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__user-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.hide-sm { display: inline; }
+@media (max-width: 600px) {
+  .hide-sm { display: none; }
+}
+

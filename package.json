@@ -1,0 +1,12 @@
+{
+  "name": "u-like-ev-management",
+  "version": "1.0.0",
+  "description": "EV Inventory & Sales Management System for U-Like",
+  "type": "module",
+  "scripts": {
+    "config": "node scripts/generate-config.js",
+    "build": "node scripts/generate-config.js",
+    "dev": "node scripts/generate-config.js && npx serve public",
+    "predeploy": "node scripts/generate-config.js"
+  }
+}

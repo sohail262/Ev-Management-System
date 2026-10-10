@@ -4,24 +4,36 @@ A mobile-friendly inventory and sales system for your 5 EV shops, built with pla
 
 ## 1. One-time Firebase setup
 
-Your project (`ulike-27111`) config is already wired into [js/firebase-init.js](js/firebase-init.js). You still need to:
+Your project credentials live securely in `.env` (copied from `.env.example`).
 
-1. In the [Firebase console](https://console.firebase.google.com/project/ulike-27111/firestore), open **Firestore Database** and click **Create database** if you haven't already (choose *Production mode*, pick the region closest to you — e.g. `asia-south1`).
-2. Deploy the security rules in [firestore.rules](firestore.rules):
+To set up:
+1. Copy `.env.example` to `.env` (already done for this machine).
+2. Generate the client config:
+   ```bash
+   npm run config
    ```
+3. In the [Firebase console](https://console.firebase.google.com/project/ulike-27111/firestore), open **Firestore Database** and click **Create database** if you haven't already (choose *Production mode*, pick the region closest to you — e.g. `asia-south1`).
+4. In the [Firebase Authentication console](https://console.firebase.google.com/project/ulike-27111/authentication):
+   - Click **Get started**
+   - Under **Sign-in method**, enable **Email/Password**
+   - Under **Users**, click **Add user** and enter your desired admin email and password.
+5. Deploy the security rules in [firestore.rules](firestore.rules):
+   ```bash
    npm install -g firebase-tools   # once
    firebase login
    firebase use ulike-27111
    firebase deploy --only firestore:rules
    ```
-   These rules allow open read/write with no login, matching the "no login, single admin" setup you asked for. Anyone with your Firebase config could read/write your data — keep the URL private. If you ever want a login screen added later, this is the one thing that changes.
+   These rules restrict read/write access to authenticated users only.
 
 ## 2. Running it locally
 
 Because the app uses native JS modules, opening `index.html` directly (`file://…`) will be blocked by the browser. Serve it over `http://` instead, e.g.:
 
-```
-npx serve .
+```bash
+npm run dev
+# or
+npx serve public
 # or
 python -m http.server 8000
 ```

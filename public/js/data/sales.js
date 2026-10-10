@@ -29,6 +29,20 @@ async function nextInvoiceNo() {
   return invoiceNumber(seq);
 }
 
+// The date input only carries YYYY-MM-DD. `new Date('YYYY-MM-DD')` is parsed as UTC
+// midnight (5:30 AM IST), so build it in local time and keep the current time of day.
+function parseSaleDate(saleDate) {
+  const now = new Date();
+  if (saleDate instanceof Date) return saleDate;
+  if (typeof saleDate === 'string') {
+    const [year, month, day] = saleDate.split('-').map(Number);
+    if (year && month && day) {
+      return new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+    }
+  }
+  return now;
+}
+
 // ================= EV SALE (flexible battery & charger) =================
 export async function createEvSale({
   ev, batteryType = '', batteryCount = 0, chargerWattage = null,
@@ -65,7 +79,7 @@ export async function createEvSale({
   const batch = writeBatch(db);
   const saleRef = doc(salesCol);
   batch.set(saleRef, {
-    invoiceNo, type: 'ev', date: saleDate ? new Date(saleDate) : serverTimestamp(),
+    invoiceNo, type: 'ev', date: parseSaleDate(saleDate),
     customerName: customerName || '', customerPhone: customerPhone || '', locationId, paymentMethod,
     evId: ev.id, providerId: ev.providerId, model: ev.model || '', chassisNo: ev.chassisNo || '',
     hasBattery: Boolean(batteryType && count > 0),
@@ -119,7 +133,7 @@ export async function createUnitSale(type, {
   const batch = writeBatch(db);
   const saleRef = doc(salesCol);
   batch.set(saleRef, {
-    invoiceNo, type, date: saleDate ? new Date(saleDate) : serverTimestamp(),
+    invoiceNo, type, date: parseSaleDate(saleDate),
     customerName: customerName || '', customerPhone: customerPhone || '', locationId, paymentMethod,
     qty: count,
     batteryType: isBattery ? batteryType : '',
@@ -147,7 +161,7 @@ export async function createSparePartSale({ part, qty, price, customerName, cust
   const batch = writeBatch(db);
   const saleRef = doc(salesCol);
   batch.set(saleRef, {
-    invoiceNo, type: 'sparepart', date: saleDate ? new Date(saleDate) : serverTimestamp(),
+    invoiceNo, type: 'sparepart', date: parseSaleDate(saleDate),
     customerName: customerName || '', customerPhone: customerPhone || '', locationId, paymentMethod,
     sparePartId: part.id, sparePartName: part.name, qty,
     price: finalPrice, costTotal, profit: finalPrice - costTotal
@@ -170,3 +184,91 @@ export async function getSale(id) {
   const snap = await getDoc(doc(salesCol, id));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
+
+// ================= DELETE SALE (WITH INVENTORY RESTORATION) =================
+export async function deleteSale(saleId) {
+  const saleSnap = await getDoc(doc(salesCol, saleId));
+  if (!saleSnap.exists()) throw new Error('Sale not found.');
+  const sale = { id: saleSnap.id, ...saleSnap.data() };
+  const batch = writeBatch(db);
+
+  if (sale.type === 'ev') {
+    if (sale.evId) {
+      const evSnap = await getDoc(doc(evCol, sale.evId));
+      if (evSnap.exists()) {
+        batch.update(evSnap.ref, {
+          status: STATUS.IN_STOCK,
+          saleId: null,
+          dateSold: null
+        });
+      }
+    }
+    if (Array.isArray(sale.batteryUnitIds) && sale.batteryUnitIds.length > 0) {
+      const battSnaps = await Promise.all(sale.batteryUnitIds.map(uId => getDoc(doc(batteryCol, uId))));
+      battSnaps.forEach(snap => {
+        if (snap.exists()) {
+          batch.update(snap.ref, {
+            status: STATUS.IN_STOCK,
+            saleId: null,
+            dateSold: null
+          });
+        }
+      });
+    }
+    if (sale.chargerUnitId) {
+      const chgSnap = await getDoc(doc(chargerCol, sale.chargerUnitId));
+      if (chgSnap.exists()) {
+        batch.update(chgSnap.ref, {
+          status: STATUS.IN_STOCK,
+          saleId: null,
+          dateSold: null
+        });
+      }
+    }
+  } else if (sale.type === 'battery' || sale.type === 'charger') {
+    const targetCol = sale.type === 'battery' ? batteryCol : chargerCol;
+    if (Array.isArray(sale.unitIds) && sale.unitIds.length > 0) {
+      const unitSnaps = await Promise.all(sale.unitIds.map(uId => getDoc(doc(targetCol, uId))));
+      unitSnaps.forEach(snap => {
+        if (snap.exists()) {
+          batch.update(snap.ref, {
+            status: STATUS.IN_STOCK,
+            saleId: null,
+            dateSold: null
+          });
+        }
+      });
+    }
+  } else if (sale.type === 'sparepart') {
+    if (sale.sparePartId) {
+      const partRef = doc(sparePartsCol, sale.sparePartId);
+      const partSnap = await getDoc(partRef);
+      if (partSnap.exists()) {
+        const currentQty = partSnap.data().quantity || 0;
+        batch.update(partRef, { quantity: currentQty + (sale.qty || 1) });
+      }
+      const logRef = doc(sparePartLogsCol);
+      batch.set(logRef, {
+        sparePartId: sale.sparePartId,
+        type: 'in',
+        qty: sale.qty || 1,
+        date: serverTimestamp(),
+        note: `Restored from deleted sale #${sale.invoiceNo || ''}`
+      });
+    }
+  }
+
+  // Delete the sale document
+  batch.delete(doc(salesCol, saleId));
+
+  // Add stock log entry
+  addStockLog(batch, {
+    type: 'cancel_sale',
+    itemType: sale.type,
+    label: `Sale #${sale.invoiceNo || ''} deleted & stock restored`,
+    locationId: sale.locationId
+  });
+
+  await batch.commit();
+}
+

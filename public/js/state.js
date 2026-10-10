@@ -55,3 +55,9 @@ export function providerName(id) {
   const p = state.providers.find(x => x.id === id);
   return p ? p.name : '—';
 }
+
+export function getProviderModels(providerId) {
+  const p = state.providers.find(x => x.id === providerId);
+  return p?.models || [];
+}
+
