@@ -4,7 +4,7 @@ import {
 } from '../firebase-init.js';
 import { addStockLog } from './log.js';
 import { logTransfer } from './transfers.js';
-import { STATUS } from '../constants.js';
+import { STATUS, DEFAULT_CHARGER_TYPE, chargerTypeOf } from '../constants.js';
 
 const evCol = collection(db, 'evUnits');
 const batteryCol = collection(db, 'batteryUnits');
@@ -126,11 +126,12 @@ export function listenUnits(type, cb) {
   return onSnapshot(unitCol(type), (snap) => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 }
 
-export async function addUnits(type, { wattage, batteryType, costPrice, sellingPrice, locationId, qty = 1 }) {
+export async function addUnits(type, { wattage, batteryType, chargerType, costPrice, sellingPrice, locationId, qty = 1 }) {
   const batch = writeBatch(db);
   const col = unitCol(type);
   const isBattery = type === 'battery';
   const cleanBattType = batteryType || 'Lead Battery';
+  const cleanChgType = chargerType || DEFAULT_CHARGER_TYPE;
   const cleanWattage = Number(wattage) || 48;
   const numQty = Math.max(1, parseInt(qty) || 1);
 
@@ -149,13 +150,14 @@ export async function addUnits(type, { wattage, batteryType, costPrice, sellingP
       data.unitWattage = 12; // Each battery is of 12W
     } else {
       data.wattage = cleanWattage;
+      data.chargerType = cleanChgType;
     }
     batch.set(ref, data);
   }
 
   const logLabel = isBattery
     ? `${numQty} × ${cleanBattType} added (${numQty * 12}W combined)`
-    : `${numQty} × ${cleanWattage}W Charger added`;
+    : `${numQty} × ${cleanWattage}W ${cleanChgType} added`;
 
   addStockLog(batch, { type: 'add', itemType: type, label: logLabel, locationId, qty: numQty });
   await batch.commit();
@@ -189,7 +191,7 @@ export async function transferUnit(type, unit, toLocationId, note = '', qty = 1)
   const isBattery = type === 'battery';
   const desc = isBattery
     ? (unit.batteryType || `${unit.wattage || 12}W Battery`)
-    : `${unit.wattage}W Charger`;
+    : `${unit.wattage}W ${chargerTypeOf(unit)}`;
   const numQty = Math.max(1, parseInt(qty) || 1);
 
   let unitsToTransfer = [unit];
@@ -200,7 +202,7 @@ export async function transferUnit(type, unit, toLocationId, note = '', qty = 1)
     if (isBattery) {
       matches = matches.filter(u => (u.batteryType || 'Lead Battery') === (unit.batteryType || 'Lead Battery'));
     } else {
-      matches = matches.filter(u => Number(u.wattage) === Number(unit.wattage));
+      matches = matches.filter(u => Number(u.wattage) === Number(unit.wattage) && chargerTypeOf(u) === chargerTypeOf(unit));
     }
     const otherMatches = matches.filter(u => u.id !== unit.id);
     unitsToTransfer = [unit, ...otherMatches].slice(0, numQty);
@@ -237,7 +239,7 @@ export async function transferUnit(type, unit, toLocationId, note = '', qty = 1)
   return count;
 }
 
-export async function createDirectTransfer({ itemType, providerId, model, batteryType, wattage, fromLocationId, toLocationId, qty = 1, note = '' }) {
+export async function createDirectTransfer({ itemType, providerId, model, batteryType, chargerType, wattage, fromLocationId, toLocationId, qty = 1, note = '' }) {
   const batch = writeBatch(db);
   const numQty = Math.max(1, parseInt(qty) || 1);
   let label = '';
@@ -266,8 +268,9 @@ export async function createDirectTransfer({ itemType, providerId, model, batter
       matches = matches.filter(u => (u.batteryType || 'Lead Battery') === (batteryType || 'Lead Battery'));
       label = `${numQty} × ${batteryType || 'Lead Battery'}`;
     } else {
-      matches = matches.filter(u => Number(u.wattage) === Number(wattage));
-      label = `${numQty} × ${wattage}W Charger`;
+      const cType = chargerType || DEFAULT_CHARGER_TYPE;
+      matches = matches.filter(u => Number(u.wattage) === Number(wattage) && chargerTypeOf(u) === cType);
+      label = `${numQty} × ${wattage}W ${cType}`;
     }
     if (matches.length < numQty) {
       throw new Error(`Only ${matches.length} unit(s) available in stock to transfer.`);
@@ -301,7 +304,7 @@ export async function createDirectTransfer({ itemType, providerId, model, batter
   return transferredIds;
 }
 
-export async function findAvailableUnits(type, { wattage, batteryType, locationId, count }) {
+export async function findAvailableUnits(type, { wattage, batteryType, chargerType, locationId, count }) {
   const col = unitCol(type);
   const q = query(col, where('status', '==', STATUS.IN_STOCK), where('locationId', '==', locationId));
   const snap = await getDocs(q);
@@ -314,6 +317,9 @@ export async function findAvailableUnits(type, { wattage, batteryType, locationI
   } else if (type === 'charger') {
     if (wattage) {
       units = units.filter(u => Number(u.wattage) === Number(wattage));
+    }
+    if (chargerType) {
+      units = units.filter(u => chargerTypeOf(u) === chargerType);
     }
   }
 

@@ -1,12 +1,12 @@
 import { getState, subscribe, locationName } from '../state.js';
 import { icon } from '../icons.js';
 import { escapeHtml, formatMoney, formatDate, openModal, closeModal, confirmDialog, toast, $ } from '../utils.js';
-import { CHARGER_WATTAGES, BATTERY_TYPES, BATTERY_UNIT_WATTAGE, STATUS } from '../constants.js';
+import { CHARGER_WATTAGES, CHARGER_TYPES, DEFAULT_CHARGER_TYPE, chargerTypeOf, BATTERY_TYPES, BATTERY_UNIT_WATTAGE, STATUS } from '../constants.js';
 import { statusBadgeHtml, inLocation } from './helpers.js';
 import { addUnits, deleteUnit, deleteUnitsBatch, transferUnit } from '../data/inventory.js';
 
 let activeType = 'battery';
-let filters = { batteryType: 'all', wattage: 'all', status: 'in-stock' };
+let filters = { batteryType: 'all', chargerType: 'all', wattage: 'all', status: 'in-stock' };
 
 export function mount(root) {
   render(root);
@@ -25,6 +25,9 @@ function render(root) {
       items = items.filter(u => (u.batteryType || 'Lead Battery') === filters.batteryType);
     }
   } else {
+    if (filters.chargerType !== 'all') {
+      items = items.filter(u => chargerTypeOf(u) === filters.chargerType);
+    }
     if (filters.wattage !== 'all') {
       items = items.filter(u => String(u.wattage) === filters.wattage);
     }
@@ -61,6 +64,15 @@ function render(root) {
           ${icon('chevronDown')}
         </div>
       </div>` : `
+      <div class="field" style="min-width:170px;">
+        <div class="select-wrap">
+          <select id="filter-charger-type-select">
+            <option value="all">All charger types</option>
+            ${CHARGER_TYPES.map(t => `<option value="${t}" ${filters.chargerType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+          ${icon('chevronDown')}
+        </div>
+      </div>
       <div class="field" style="min-width:150px;">
         <div class="select-wrap">
           <select id="filter-wattage-select">
@@ -95,6 +107,7 @@ function render(root) {
   if (activeType === 'battery') {
     $('#filter-type-select')?.addEventListener('change', (e) => { filters.batteryType = e.target.value; render(root); });
   } else {
+    $('#filter-charger-type-select')?.addEventListener('change', (e) => { filters.chargerType = e.target.value; render(root); });
     $('#filter-wattage-select')?.addEventListener('change', (e) => { filters.wattage = e.target.value; render(root); });
   }
   $('#filter-status').addEventListener('change', (e) => { filters.status = e.target.value; render(root); });
@@ -111,7 +124,7 @@ function renderTable(items, state) {
   items.forEach(u => {
     const itemKey = isBattery
       ? (u.batteryType || 'Lead Battery')
-      : `${u.wattage || 48}W Charger`;
+      : `${u.wattage || 48}W ${chargerTypeOf(u)}`;
     const groupKey = `${itemKey}__${u.locationId}`;
 
     if (!groupMap.has(groupKey)) {
@@ -120,6 +133,7 @@ function renderTable(items, state) {
         itemKey,
         itemType: activeType,
         batteryType: u.batteryType || 'Lead Battery',
+        chargerType: chargerTypeOf(u),
         wattage: Number(u.wattage) || (isBattery ? 12 : 48),
         locationId: u.locationId,
         costPrice: u.costPrice || 0,
@@ -157,7 +171,7 @@ function renderTable(items, state) {
       <table>
         <thead>
           <tr>
-            <th>${isBattery ? 'Battery Type' : 'Wattage'}</th>
+            <th>${isBattery ? 'Battery Type' : 'Charger'}</th>
             ${isBattery ? '<th>Unit Rating</th>' : ''}
             <th>Showroom Location</th>
             <th class="num">In Stock (Qty)</th>
@@ -299,6 +313,7 @@ function openQuickAddModal(state, g) {
       } else {
         await addUnits('charger', {
           wattage: g.wattage,
+          chargerType: g.chargerType,
           costPrice: Number(fd.get('costPrice')),
           sellingPrice: Number(fd.get('sellingPrice')),
           locationId: g.locationId,
@@ -376,6 +391,15 @@ function openAddForm(state) {
           </div>
           ` : `
           <div class="field">
+            <label>Charger Type</label>
+            <div class="select-wrap">
+              <select name="chargerType" required>
+                ${CHARGER_TYPES.map(t => `<option value="${t}" ${t === DEFAULT_CHARGER_TYPE ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>
+              ${icon('chevronDown')}
+            </div>
+          </div>
+          <div class="field">
             <label>Charger Wattage</label>
             <div class="select-wrap">
               <select name="wattage" required>
@@ -398,7 +422,7 @@ function openAddForm(state) {
               ${icon('chevronDown')}
             </div>
           </div>
-          <div></div>
+          ${isBattery ? '<div></div>' : ''}
           <div class="field">
             <label>Cost price <span class="hint">(per unit)</span></label>
             <input name="costPrice" type="number" min="0" step="1" required value="0">
@@ -440,6 +464,7 @@ function openAddForm(state) {
       } else {
         await addUnits('charger', {
           wattage: Number(fd.get('wattage')),
+          chargerType: fd.get('chargerType'),
           costPrice: Number(fd.get('costPrice')),
           sellingPrice: Number(fd.get('sellingPrice')),
           locationId: fd.get('locationId'),

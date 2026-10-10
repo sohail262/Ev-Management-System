@@ -1,7 +1,7 @@
 import { getState, subscribe, locationName, providerName } from '../state.js';
 import { icon } from '../icons.js';
 import { formatMoney, formatDateTime } from '../utils.js';
-import { STATUS } from '../constants.js';
+import { STATUS, chargerTypeOf } from '../constants.js';
 import { inLocation, lowStockAlerts } from './helpers.js';
 
 export function mount(root) {
@@ -54,7 +54,7 @@ function render(root) {
     <div class="kpi-grid">
       ${kpi('ev', 'EVs in stock', evInStock.length, `${state.evUnits.filter(e=>inLocation(e,lf)).length} total added`)}
       ${kpi('battery', 'Batteries in stock', batteriesInStock.length, `across ${new Set(batteriesInStock.map(b=>b.batteryType || 'Lead Battery')).size || 0} types`)}
-      ${kpi('charger', 'Chargers in stock', chargersInStock.length, `across ${new Set(chargersInStock.map(c=>c.wattage)).size || 0} wattages`)}
+      ${kpi('charger', 'Chargers in stock', chargersInStock.length, `across ${new Set(chargersInStock.map(c=>`${chargerTypeOf(c)}|${c.wattage}`)).size || 0} types`)}
       ${kpi('package', 'Spare parts', sparePartsQty, `${formatMoney(sparePartsValue)} stock value`)}
       ${kpi('sales', "Today's revenue", formatMoney(todayRevenue), `${todaySales.length} sale${todaySales.length===1?'':'s'} today`, 'info')}
       ${kpi('wallet', "Today's expenses", formatMoney(todayExpenseTotal), `${todayExpenses.length} expense${todayExpenses.length===1?'':'s'} today`, todayExpenseTotal > 0 ? 'warn' : '')}
@@ -136,7 +136,7 @@ function logIcon(type) {
 function saleLabel(s) {
   if (s.type === 'ev') return `${providerName(s.providerId)} EV${s.model ? ' ' + s.model : ''}${s.customerName ? ` — ${s.customerName}` : ''}`;
   if (s.type === 'battery') return `${s.qty || 1}× ${s.batteryType || 'Lead Battery'}`;
-  if (s.type === 'charger') return `${s.qty || 1}× ${s.wattage}W Charger`;
+  if (s.type === 'charger') return `${s.qty || 1}× ${s.wattage}W ${chargerTypeOf(s)}`;
   if (s.type === 'sparepart') return `${s.sparePartName} × ${s.qty}`;
   return `${s.type}`;
 }

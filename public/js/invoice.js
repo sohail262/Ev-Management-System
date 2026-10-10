@@ -45,7 +45,7 @@ function buildRows(sale, meta) {
     if (sale.hasCharger || sale.chargerWattage || chgTotal > 0) {
       const cWatt = sale.chargerWattage || sale.batteryWattage || 60;
       rows.push({
-        desc: `${cWatt}W Charger`,
+        desc: `${cWatt}W ${sale.chargerType || 'Lead Charger'}`,
         qty: 1,
         unit: chgTotal,
         amount: chgTotal
@@ -71,7 +71,7 @@ function buildRows(sale, meta) {
     const qty = sale.qty || 1;
     const cWatt = sale.wattage || sale.chargerWattage || 60;
     return [{
-      desc: `${cWatt}W Charger`,
+      desc: `${cWatt}W ${sale.chargerType || 'Lead Charger'}`,
       qty,
       unit: qty ? (sale.price || 0) / qty : (sale.price || 0),
       amount: sale.price || 0

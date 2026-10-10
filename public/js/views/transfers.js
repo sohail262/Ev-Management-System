@@ -1,7 +1,7 @@
 import { getState, subscribe, locationName, providerName } from '../state.js';
 import { icon } from '../icons.js';
 import { escapeHtml, formatDateTime, openModal, closeModal, toast, $ } from '../utils.js';
-import { STATUS, BATTERY_TYPES, CHARGER_WATTAGES } from '../constants.js';
+import { STATUS, BATTERY_TYPES, CHARGER_WATTAGES, CHARGER_TYPES, chargerTypeOf } from '../constants.js';
 import { createDirectTransfer, transferSparePart } from '../data/inventory.js';
 
 let filters = { itemType: 'all', locationId: 'all' };
@@ -205,17 +205,16 @@ function openNewTransferModal(state) {
       $('#tr-battery-select', itemWrap).addEventListener('change', refreshQtyLimit);
     } else if (type === 'charger') {
       const counts = {};
-      CHARGER_WATTAGES.forEach(w => { counts[w] = 0; });
       state.chargerUnits.filter(u => u.locationId === fromId && u.status === STATUS.IN_STOCK).forEach(u => {
-        const k = Number(u.wattage) || 48;
+        const k = `${chargerTypeOf(u)}|${Number(u.wattage) || 48}`;
         counts[k] = (counts[k] || 0) + 1;
       });
 
       itemWrap.innerHTML = `
-        <label>Charger Wattage</label>
+        <label>Charger</label>
         <div class="select-wrap">
-          <select name="wattage" id="tr-charger-select" required>
-            ${CHARGER_WATTAGES.map(w => `<option value="${w}">${w}W Charger (${counts[w] || 0} in stock)</option>`).join('')}
+          <select name="chargerChoice" id="tr-charger-select" required>
+            ${CHARGER_TYPES.map(t => CHARGER_WATTAGES.map(w => `<option value="${t}|${w}">${w}W ${t} (${counts[`${t}|${w}`] || 0} in stock)</option>`).join('')).join('')}
           </select>
           ${icon('chevronDown')}
         </div>
@@ -294,8 +293,8 @@ function openNewTransferModal(state) {
       const bType = $('#tr-battery-select', itemWrap)?.value || 'Lead Battery';
       available = state.batteryUnits.filter(u => u.locationId === fromId && u.status === STATUS.IN_STOCK && (u.batteryType || 'Lead Battery') === bType).length;
     } else if (type === 'charger') {
-      const wattage = Number($('#tr-charger-select', itemWrap)?.value) || 48;
-      available = state.chargerUnits.filter(u => u.locationId === fromId && u.status === STATUS.IN_STOCK && Number(u.wattage) === wattage).length;
+      const [cType, cWatt] = ($('#tr-charger-select', itemWrap)?.value || `${CHARGER_TYPES[0]}|48`).split('|');
+      available = state.chargerUnits.filter(u => u.locationId === fromId && u.status === STATUS.IN_STOCK && Number(u.wattage) === Number(cWatt) && chargerTypeOf(u) === cType).length;
     } else if (type === 'ev') {
       const evChoice = $('#tr-ev-select', itemWrap)?.value;
       if (evChoice) {
@@ -360,16 +359,18 @@ function openNewTransferModal(state) {
         });
         toast(`${qty} ${fd.get('batteryType')} transferred to ${locationName(toLocationId)}`, 'success');
       } else if (itemType === 'charger') {
-        const w = Number(fd.get('wattage'));
+        const [cType, cWatt] = (fd.get('chargerChoice') || '').split('|');
+        const w = Number(cWatt);
         await createDirectTransfer({
           itemType: 'charger',
+          chargerType: cType,
           wattage: w,
           fromLocationId,
           toLocationId,
           qty,
           note
         });
-        toast(`${qty} × ${w}W Charger transferred to ${locationName(toLocationId)}`, 'success');
+        toast(`${qty} × ${w}W ${cType} transferred to ${locationName(toLocationId)}`, 'success');
       } else if (itemType === 'sparepart') {
         const partId = fd.get('partId');
         const part = state.spareParts.find(p => p.id === partId);

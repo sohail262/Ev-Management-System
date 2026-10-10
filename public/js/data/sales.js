@@ -2,7 +2,7 @@ import {
   db, collection, doc, getDoc, query, orderBy, fsLimit, onSnapshot,
   writeBatch, runTransaction, serverTimestamp
 } from '../firebase-init.js';
-import { STATUS } from '../constants.js';
+import { STATUS, DEFAULT_CHARGER_TYPE, chargerTypeOf } from '../constants.js';
 import { addStockLog } from './log.js';
 import { findAvailableUnits } from './inventory.js';
 import { invoiceNumber } from '../utils.js';
@@ -14,6 +14,11 @@ const chargerCol = collection(db, 'chargerUnits');
 const sparePartsCol = collection(db, 'spareParts');
 const sparePartLogsCol = collection(db, 'sparePartLogs');
 const counterRef = doc(db, 'meta', 'counters');
+
+// A cost price typed in the sale form overrides the cost recorded on the stock units.
+function resolveCost(costPrice, computed) {
+  return costPrice != null && costPrice !== '' && !isNaN(Number(costPrice)) ? Number(costPrice) : computed;
+}
 
 function unitCol(type) {
   return type === 'battery' ? batteryCol : chargerCol;
@@ -45,8 +50,8 @@ function parseSaleDate(saleDate) {
 
 // ================= EV SALE (flexible battery & charger) =================
 export async function createEvSale({
-  ev, batteryType = '', batteryCount = 0, chargerWattage = null,
-  price, customerName, customerPhone, locationId, paymentMethod, saleDate
+  ev, batteryType = '', batteryCount = 0, chargerWattage = null, chargerType = DEFAULT_CHARGER_TYPE,
+  price, costPrice, customerName, customerPhone, locationId, paymentMethod, saleDate
 }) {
   const count = Number(batteryCount) || 0;
   let batteryUnits = [];
@@ -59,9 +64,9 @@ export async function createEvSale({
 
   let chargerUnit = null;
   if (chargerWattage) {
-    const chgUnits = await findAvailableUnits('charger', { wattage: Number(chargerWattage), locationId, count: 1 });
+    const chgUnits = await findAvailableUnits('charger', { wattage: Number(chargerWattage), chargerType, locationId, count: 1 });
     if (!chgUnits.length) {
-      throw new Error(`No ${chargerWattage}W charger available at this location.`);
+      throw new Error(`No ${chargerWattage}W ${chargerType} available at this location.`);
     }
     chargerUnit = chgUnits[0];
   }
@@ -71,7 +76,7 @@ export async function createEvSale({
   const chgCost = chargerUnit ? (chargerUnit.costPrice || 0) : 0;
   const chgSelling = chargerUnit ? (chargerUnit.sellingPrice || 0) : 0;
 
-  const costTotal = (ev.costPrice || 0) + battCost + chgCost;
+  const costTotal = resolveCost(costPrice, (ev.costPrice || 0) + battCost + chgCost);
   const computedPrice = (ev.sellingPrice || 0) + battSelling + chgSelling;
   const finalPrice = price != null && price !== '' ? Number(price) : computedPrice;
   const invoiceNo = await nextInvoiceNo();
@@ -90,6 +95,7 @@ export async function createEvSale({
     batteriesPrice: battSelling,
     hasCharger: Boolean(chargerUnit),
     chargerWattage: chargerUnit ? Number(chargerWattage) : null,
+    chargerType: chargerUnit ? chargerTypeOf(chargerUnit) : '',
     chargerUnitId: chargerUnit ? chargerUnit.id : null,
     chargerPrice: chgSelling,
     evPrice: ev.sellingPrice || 0,
@@ -109,23 +115,24 @@ export async function createEvSale({
 
 // ================= STANDALONE BATTERY / CHARGER SALE =================
 export async function createUnitSale(type, {
-  batteryType, wattage, qty = 1, price, locationId, customerName, customerPhone, paymentMethod, saleDate
+  batteryType, wattage, chargerType = DEFAULT_CHARGER_TYPE, qty = 1, price, costPrice, locationId, customerName, customerPhone, paymentMethod, saleDate
 }) {
   const count = Math.max(1, Number(qty) || 1);
   const isBattery = type === 'battery';
   const units = await findAvailableUnits(type, {
     batteryType: isBattery ? batteryType : undefined,
     wattage: !isBattery ? Number(wattage) : undefined,
+    chargerType: !isBattery ? chargerType : undefined,
     locationId,
     count
   });
 
   if (units.length < count) {
-    const name = isBattery ? batteryType : `${wattage}W Charger`;
+    const name = isBattery ? batteryType : `${wattage}W ${chargerType}`;
     throw new Error(`Only ${units.length} unit(s) of ${name} available at this location (need ${count}).`);
   }
 
-  const costTotal = units.reduce((s, u) => s + (u.costPrice || 0), 0);
+  const costTotal = resolveCost(costPrice, units.reduce((s, u) => s + (u.costPrice || 0), 0));
   const computedPrice = units.reduce((s, u) => s + (u.sellingPrice || 0), 0);
   const finalPrice = price != null && price !== '' ? Number(price) : computedPrice;
   const invoiceNo = await nextInvoiceNo();
@@ -139,6 +146,7 @@ export async function createUnitSale(type, {
     batteryType: isBattery ? batteryType : '',
     batteryCombinedWattage: isBattery ? (count * 12) : null,
     wattage: isBattery ? 12 : Number(wattage),
+    chargerType: isBattery ? '' : chargerType,
     unitIds: units.map(u => u.id),
     price: finalPrice, costTotal, profit: finalPrice - costTotal
   });
@@ -146,18 +154,18 @@ export async function createUnitSale(type, {
   units.forEach(u => batch.update(doc(unitCol(type), u.id), { status: STATUS.SOLD, saleId: saleRef.id, dateSold: serverTimestamp() }));
   const logDesc = isBattery
     ? `${count} × ${batteryType} sold (${count * 12}W)`
-    : `${count} × ${wattage}W Charger sold`;
+    : `${count} × ${wattage}W ${chargerType} sold`;
   addStockLog(batch, { type: 'sale', itemType: type, label: logDesc, locationId });
   await batch.commit();
   return saleRef.id;
 }
 
 // ================= SPARE PART SALE =================
-export async function createSparePartSale({ part, qty, price, customerName, customerPhone, locationId, paymentMethod, saleDate }) {
+export async function createSparePartSale({ part, qty, price, costPrice, customerName, customerPhone, locationId, paymentMethod, saleDate }) {
   if (qty > (part.quantity || 0)) throw new Error(`Only ${part.quantity} in stock.`);
   const invoiceNo = await nextInvoiceNo();
   const finalPrice = price != null && price !== '' ? Number(price) : (part.sellingPrice || 0) * qty;
-  const costTotal = (part.costPrice || 0) * qty;
+  const costTotal = resolveCost(costPrice, (part.costPrice || 0) * qty);
   const batch = writeBatch(db);
   const saleRef = doc(salesCol);
   batch.set(saleRef, {

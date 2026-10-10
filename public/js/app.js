@@ -6,7 +6,7 @@ import {
   updatePassword, reauthenticateWithCredential, EmailAuthProvider
 } from './firebase-init.js';
 
-const V = '?v=2.8';
+const V = '?v=2.9';
 const ROUTES = [
   { id: 'dashboard', label: 'Dashboard', tag: 'Overview', icon: 'dashboard', mod: () => import(`./views/dashboard.js${V}`) },
   { id: 'evs', label: 'EV Inventory', tag: 'Vehicles', icon: 'ev', mod: () => import(`./views/evInventory.js${V}`) },

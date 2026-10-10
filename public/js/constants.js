@@ -5,6 +5,10 @@
 export const CHARGER_WATTAGES = [48, 60, 72];
 export const WATTAGES = CHARGER_WATTAGES; // alias for charger wattages
 
+export const CHARGER_TYPES = ['Lead Charger', 'Lithium Ion Charger'];
+export const DEFAULT_CHARGER_TYPE = 'Lead Charger'; // chargers added before types existed are Lead chargers
+export const chargerTypeOf = (u) => u?.chargerType || DEFAULT_CHARGER_TYPE;
+
 export const BATTERY_TYPES = ['Lead Battery', 'Lithium Battery'];
 export const BATTERY_UNIT_WATTAGE = 12; // Each battery is of 12W
 

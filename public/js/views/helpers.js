@@ -1,4 +1,4 @@
-import { STATUS, LOW_STOCK_THRESHOLDS } from '../constants.js';
+import { STATUS, LOW_STOCK_THRESHOLDS, chargerTypeOf } from '../constants.js';
 import { locationName, providerName } from '../state.js';
 import { groupBy } from '../utils.js';
 
@@ -38,15 +38,15 @@ export function lowStockAlerts(state, locationFilter) {
     }
   }
 
-  // Charger low stock (by wattage per location)
+  // Charger low stock (by type & wattage per location)
   const chgUnits = state.chargerUnits.filter(u => u.status === STATUS.IN_STOCK && inLocation(u, locationFilter));
-  const chgGroups = groupBy(chgUnits, u => `${u.locationId}|${u.wattage}`);
+  const chgGroups = groupBy(chgUnits, u => `${u.locationId}|${chargerTypeOf(u)}|${u.wattage}`);
   for (const [key, items] of chgGroups.entries()) {
-    const [locationId, wattage] = key.split('|');
+    const [locationId, cType, wattage] = key.split('|');
     if (items.length < LOW_STOCK_THRESHOLDS.charger) {
       alerts.push({
         itemType: 'charger',
-        title: `${wattage}W Chargers low`,
+        title: `${wattage}W ${cType} low`,
         sub: locationName(locationId),
         count: items.length
       });
